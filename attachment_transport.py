@@ -249,7 +249,7 @@ def save_chunks(
     try:
         with (
             os.fdopen(fd, "wb") as stream,
-            progress.stage("Attachment bytes", total=total, unit="bytes") as work,
+            progress.stage("Save attachment", total=total, unit="bytes") as work,
         ):
             for chunk in chunks:
                 if not chunk:

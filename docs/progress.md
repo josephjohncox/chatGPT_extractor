@@ -20,7 +20,7 @@ Unknown totals remain indeterminate: a cursor-based listing and a directory scan
 Attachment work shares one **Attachments** panel instead of leaving a completed status row for every file. It contains:
 
 - An aggregate row: processed work, saved/skipped/failed counts, and distinct references found so far. Other outcome counts appear when nonzero.
-- One reusable current-activity row: reference discovery, cache checks, resolution/authentication, transfer, or retry/pacing wait. Byte counts and wide-terminal transfer rates use B/KiB/MiB units. The item ordinal refers to the current conversation, project batch, or saved queue, not the entire account.
+- One reusable current-activity row: reference discovery, cache checks, resolution/authentication, transfer, or retry/pacing wait. Size totals and transfer rates use B/KiB/MiB/GiB units in the terminal and redirected logs (for example, `9.0 MiB/20.0 MiB` and `512.0 KiB/s`). The transfer activity is labelled `Save attachment`. The item ordinal refers to the current conversation, project batch, or saved queue, not the entire account.
 
 The current row is reused across files and hidden between attachment batches. The finished panel collapses to one summary row. Ordinary attachment notices update the panel in place rather than adding console history. Warnings and errors remain visible. Redirected logs use throttled aggregate updates while retaining retry, recovery, and cooldown-stop diagnostics.
 

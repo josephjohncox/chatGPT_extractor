@@ -34,6 +34,10 @@ def human_bytes(size: int) -> str:
     return f"{size} B"
 
 
+def size_progress(completed: int, total: int | None) -> str:
+    return f"{human_bytes(completed)}/{human_bytes(total) if total is not None else '?'}"
+
+
 def safe_terminal_text(message: str) -> str:
     return "".join(char if char >= " " and not 127 <= ord(char) <= 159 else " " for char in message)
 
@@ -41,8 +45,11 @@ def safe_terminal_text(message: str) -> str:
 class CountsColumn(MofNCompleteColumn):
     def render(self, task: Task) -> Text:
         if task.fields.get("unit") == "bytes":
-            total = human_bytes(int(task.total)) if task.total is not None else "?"
-            return Text(f"{human_bytes(int(task.completed))}/{total}")
+            return Text(
+                size_progress(
+                    int(task.completed), int(task.total) if task.total is not None else None
+                )
+            )
         return super().render(task)
 
 
@@ -314,6 +321,8 @@ class ProgressTask:
             if self.total is not None
             else f"{self.completed} processed (total unknown)"
         )
+        if self.unit == "bytes":
+            counts = size_progress(self.completed, self.total)
         eta = ""
         if (
             self.total is not None
@@ -322,9 +331,14 @@ class ProgressTask:
             and state == "working"
         ):
             eta = f"; ETA ~{elapsed * (self.total - self.completed) / self.completed:.1f}s"
-        rate = (
-            f"; {self.completed / elapsed:.1f}/s" if self.completed > 1 and elapsed >= 0.1 else ""
-        )
+        rate = ""
+        if self.completed > 1 and elapsed >= 0.1:
+            speed = (
+                human_bytes(int(self.completed / elapsed))
+                if self.unit == "bytes"
+                else f"{self.completed / elapsed:.1f}"
+            )
+            rate = f"; {speed}/s"
         self.reporter.notice(
             f"{self.label}: {state}; {counts}; {elapsed:.1f}s{rate}{eta}"
             + (f"; {self.detail}" if self.detail else "")
@@ -476,12 +490,19 @@ class ProgressGroup:
         if not force and time.monotonic() - self.last_log < self.reporter.interval:
             return
         activity = self.tasks[-1] if self.tasks else None
+        transfer = ""
+        if activity is not None and activity.unit == "bytes":
+            transfer = size_progress(activity.completed, activity.total)
+            elapsed = time.monotonic() - activity.started
+            if activity.completed > 1 and elapsed >= 0.1:
+                transfer += f"; {human_bytes(int(activity.completed / elapsed))}/s"
         details = "; ".join(
             part
             for part in (
                 self.root.detail,
                 self.current_item,
                 activity.label if activity else "",
+                transfer,
                 activity.detail if activity else "",
                 self.last_notice,
             )
