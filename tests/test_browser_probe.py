@@ -115,6 +115,10 @@ def test_download_documents_output_index_projects_and_cookie_alternatives():
         "CHATGPT_SESSION_TOKEN_1",
         "HttpOnly",
         "no automatic fallback",
+        "docs/authentication.md",
+        "Application > Cookies > https://chatgpt.com",
+        "__Secure-next-auth.session-token.0 / .1",
+        "copy the complete Value",
     ):
         assert expected in text
     example = tomllib.loads((PROBE.parents[1] / "mise.local.toml.example").read_text())["env"]

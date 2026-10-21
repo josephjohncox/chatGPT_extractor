@@ -34,6 +34,8 @@ mise trust mise.local.toml
 
 Mise automatically merges `mise.local.toml`; Python reads only environment variables. The private file is Git-ignored. Never put credentials in Python source, command-line arguments, issues, or committed mise configuration. Do not use verbose HTTP/environment debugging with real credentials.
 
+Follow **[Get ChatGPT session tokens](docs/authentication.md)** for numbered browser steps, single/split-cookie mapping, workspace selection, and an authentication check. The guide includes Chrome/Edge shortcuts and the Firefox cookie-view location.
+
 Choose one authentication method in that file:
 
 - **Bearer token:** in a signed-in browser, open `https://chatgpt.com/api/auth/session` and place its `accessToken` value in `CHATGPT_ACCESS_TOKEN`.
