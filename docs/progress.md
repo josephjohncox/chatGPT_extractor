@@ -15,6 +15,17 @@ Progress updates while a network request or retry wait is pending. A request row
 
 Unknown totals remain indeterminate: a cursor-based listing and a directory scan do not have a trustworthy denominator at the start. The exporter reports page numbers, items received, and unique counts until discovery finishes. After that, conversation export and HTML generation use known totals. ETAs change as processing rates change and are not completion guarantees.
 
+## Grouped attachment progress
+
+Attachment work shares one **Attachments** panel instead of leaving a completed status row for every file. It contains:
+
+- An aggregate row: processed work, saved/skipped/failed counts, and distinct references found so far. Other outcome counts appear when nonzero.
+- One reusable current-activity row: reference discovery, cache checks, resolution/authentication, transfer, or retry/pacing wait. Byte counts and wide-terminal transfer rates use B/KiB/MiB units. The item ordinal refers to the current conversation, project batch, or saved queue, not the entire account.
+
+The current row is reused across files and hidden between attachment batches. The finished panel collapses to one summary row. Ordinary attachment notices update the panel in place rather than adding console history. Warnings and errors remain visible. Redirected logs use throttled aggregate updates while retaining retry, recovery, and cooldown-stop diagnostics.
+
+The overall attachment total stays unknown while conversations are still being discovered/fetched; a batch reaching its last file does not claim the account is complete. Processed work can exceed distinct references when multiple saved sources examine the same asset. Cached Markdown attachment verification counts as skipped work once per reference in the run. Deferred/interrupted runs keep an unknown overall denominator rather than showing a false 100%.
+
 ## Stages and counters
 
 | Stage | Reported information |

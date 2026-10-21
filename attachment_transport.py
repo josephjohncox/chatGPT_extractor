@@ -247,7 +247,10 @@ def save_chunks(
     size = 0
     digest = hashlib.sha256()
     try:
-        with os.fdopen(fd, "wb") as stream, progress.stage("Attachment bytes", total=total) as work:
+        with (
+            os.fdopen(fd, "wb") as stream,
+            progress.stage("Attachment bytes", total=total, unit="bytes") as work,
+        ):
             for chunk in chunks:
                 if not chunk:
                     continue

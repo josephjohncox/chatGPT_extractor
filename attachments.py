@@ -23,7 +23,7 @@ from canvas_artifacts import canvas_artifacts
 from chatgpt_client import ChatGPTClient, ExportError, HTTPError, RetryStopped
 from conversation_format import sanitize_filename
 from export_io import decode_json, write_json_file, write_text_file
-from progress_report import NO_PROGRESS, ProgressReporter
+from progress_report import NO_PROGRESS, ProgressGroup, ProgressReporter
 
 OWNER = "chatgpt-extractor attachments v1"
 
@@ -33,7 +33,7 @@ def checksum(path: Path, progress: ProgressReporter = NO_PROGRESS) -> str:
     with (
         path.open("rb") as source,
         progress.stage(
-            "Verify cached attachment", total=path.stat().st_size, transient=True
+            "Verify cached attachment", total=path.stat().st_size, transient=True, unit="bytes"
         ) as work,
     ):
         while chunk := source.read(1024 * 1024):
@@ -177,6 +177,7 @@ class AttachmentManager:
             self.unsupported
         ) = 0
         self.interrupted = 0
+        self._progress_group: ProgressGroup | None = None
 
     def __enter__(self) -> "AttachmentManager":
         return self
@@ -187,14 +188,64 @@ class AttachmentManager:
         value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        self.close()
+        state = (
+            "interrupted"
+            if kind is not None and issubclass(kind, KeyboardInterrupt)
+            else "deferred"
+            if getattr(value, "temporary_stop", False)
+            else "failed"
+            if kind
+            else None
+        )
+        self.close(state=state)
 
-    def close(self) -> None:
+    def close(self, *, state: str | None = None) -> None:
         if self.local:
             self.local.close()
+        if self._progress_group is not None:
+            self._sync_group()
+            missing = any(self.data["assets"][key].get("outcome") != "saved" for key in self.seen)
+            self._progress_group.finish(
+                self.summary(), state=state or ("partial" if missing else "done")
+            )
+
+    def _group(self) -> ProgressGroup:
+        if self._progress_group is None:
+            self._progress_group = self.progress.group("Attachments")
+        return self._progress_group
+
+    def _sync_group(self) -> None:
+        if self._progress_group is not None and not self._progress_group.finished:
+            completed = (
+                self.saved
+                + self.skipped
+                + self.unavailable
+                + self.failed
+                + self.partial
+                + self.unsupported
+                + self.interrupted
+            )
+            self._progress_group.update(
+                completed=completed,
+                detail=(
+                    f"saved={self.saved}; skipped={self.skipped}; failed={self.failed}"
+                    + "".join(
+                        f"; {name}={count}"
+                        for name, count in (
+                            ("unavailable", self.unavailable),
+                            ("partial", self.partial),
+                            ("unsupported", self.unsupported),
+                            ("interrupted", self.interrupted),
+                        )
+                        if count
+                    )
+                    + f"; distinct refs so far={len(self.seen)}"
+                ),
+            )
 
     def checkpoint(self) -> None:
         write_json_file(self.path, self.data)
+        self._sync_group()
 
     def register(self, refs: list[AttachmentRef]) -> None:
         for ref in refs:
@@ -237,15 +288,24 @@ class AttachmentManager:
 
     def conversation_complete(self, ident: str, updated: Any) -> bool:
         source = self.data["conversations"].get(ident)
-        return (
-            not self.refresh
-            and isinstance(source, dict)
-            and source.get("update_time") == updated
-            and source.get("complete") is True
-            and all(
-                self.valid(self.data["assets"].get(key, {})) for key in source.get("references", [])
-            )
-        )
+        if (
+            self.refresh
+            or not isinstance(source, dict)
+            or source.get("update_time") != updated
+            or source.get("complete") is not True
+        ):
+            return False
+        with self._group().activate() as group:
+            group.current("Checking cached conversation assets")
+            keys = source.get("references", [])
+            complete = all(self.valid(self.data["assets"].get(key, {})) for key in keys)
+            if complete:
+                for key in keys:
+                    if key not in self.seen:
+                        self.seen.add(key)
+                        self.skipped += 1
+            self._sync_group()
+            return complete
 
     def _entry(self, ref: AttachmentRef) -> dict:
         old = self.data["assets"].get(ref.key, {})
@@ -256,6 +316,13 @@ class AttachmentManager:
         return entry
 
     def _binary(self, ref: AttachmentRef) -> None:
+        with self._group().activate(), self.progress.stage("Current attachment", transient=True):
+            try:
+                self._download_binary(ref)
+            finally:
+                self._sync_group()
+
+    def _download_binary(self, ref: AttachmentRef) -> None:
         previous = self.data["assets"].get(ref.key, {})
         self.seen.add(ref.key)
         if not self.refresh and self.valid(previous):
@@ -360,6 +427,11 @@ class AttachmentManager:
             self.checkpoint()
 
     def process(self, detail: dict, meta: dict | None = None) -> None:
+        with self._group().activate() as group:
+            group.current("Discovering conversation references")
+            self._process(detail, meta)
+
+    def _process(self, detail: dict, meta: dict | None = None) -> None:
         meta = meta or detail
         cid = str(detail.get("id") or detail.get("conversation_id") or meta.get("id") or "")
         has_id = bool(cid)
@@ -415,12 +487,18 @@ class AttachmentManager:
         with self.progress.stage(
             "Conversation attachments", total=len(refs) + len(canvases), transient=True
         ) as work:
-            for ref in refs:
+            for ordinal, ref in enumerate(refs, 1):
+                self._group().current(
+                    f"item {ordinal}/{len(all_refs)} in this conversation; {ref.kind}"
+                )
                 try:
                     self._binary(ref)
                 finally:
-                    work.advance(detail=self.summary())
-            for artifact in canvases:
+                    work.advance()
+            for ordinal, artifact in enumerate(canvases, len(refs) + 1):
+                self._group().current(
+                    f"item {ordinal}/{len(all_refs)} in this conversation; canvas"
+                )
                 ref = replace(artifact.ref, project_id=project)
                 self.seen.add(ref.key)
                 content = artifact.content.encode("utf-8")
@@ -439,7 +517,8 @@ class AttachmentManager:
                 ):
                     self.data["assets"][ref.key]["outcome"] = "saved"
                     self.skipped += 1
-                    work.advance(detail=self.summary())
+                    self._sync_group()
+                    work.advance()
                     continue
                 entry = self._entry(ref)
                 name = asset_name(ref.name, "canvas.txt")
@@ -471,7 +550,7 @@ class AttachmentManager:
                         )
                         self.partial += 1
                         self.checkpoint()
-                        work.advance(detail=self.summary())
+                        work.advance()
                         continue
                     result = save_chunks(
                         [content],
@@ -502,19 +581,24 @@ class AttachmentManager:
                     entry.update(outcome="interrupted", error="interrupted")
                     self.interrupted += 1
                     self.checkpoint()
-                    work.advance(detail=self.summary())
+                    work.advance()
                     raise
                 except (ExportError, OSError):
                     entry.update(outcome="failed", error="canvas_materialization_failed")
                     self.failed += 1
                 self.checkpoint()
-                work.advance(detail=self.summary())
+                work.advance()
         self.data["conversations"][cid]["complete"] = all(
             self.data["assets"][key].get("outcome") == "saved" for key in keys
         )
         self.checkpoint()
 
     def projects(self, records: dict[str, list[dict]]) -> None:
+        with self._group().activate() as group:
+            group.current("Discovering project attachments")
+            self._projects(records)
+
+    def _projects(self, records: dict[str, list[dict]]) -> None:
         refs = []
         from attachment_refs import FILE_ID
 
@@ -544,17 +628,20 @@ class AttachmentManager:
                     )
         self.register(refs)
         with self.progress.stage("Project attachments", total=len(refs)) as work:
-            for ref in refs:
+            for ordinal, ref in enumerate(refs, 1):
+                self._group().current(f"project item {ordinal}/{len(refs)}; {ref.kind}")
                 self._binary(ref)
-                work.advance(detail=self.summary())
+                work.advance()
 
     def summary(self) -> str:
         return f"saved={self.saved}; skipped={self.skipped}; unavailable={self.unavailable}; failed={self.failed}; partial={self.partial}; unsupported={self.unsupported}; interrupted={self.interrupted}"
 
     def finish(self) -> int:
         self.checkpoint()
-        self.progress.notice("Attachment summary: " + self.summary())
+        group = self._group()
+        self._sync_group()
         missing = sum(self.data["assets"][key].get("outcome") != "saved" for key in self.seen)
+        group.finish(self.summary(), state="partial" if missing else "done")
         if missing:
             self.progress.warning(
                 f"{missing} attachment references are incomplete; inspect the private attachment manifest"
@@ -562,11 +649,17 @@ class AttachmentManager:
         return int(bool(missing))
 
     def resume_unseen(self) -> None:
+        with self._group().activate() as group:
+            group.current("Resuming saved attachment queue")
+            self._resume_unseen()
+
+    def _resume_unseen(self) -> None:
         from attachment_refs import FILE_ID, sandbox_path
 
-        for key, entry in list(self.data["assets"].items()):
+        for ordinal, (key, entry) in enumerate(list(self.data["assets"].items()), 1):
             if key in self.seen:
                 continue
+            self._group().current(f"queue item {ordinal}/{len(self.data['assets'])}")
             raw = entry.get("reference")
             if not isinstance(raw, dict) or not all(
                 isinstance(value, str) for value in raw.values()
