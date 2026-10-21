@@ -3,6 +3,7 @@
 # Use ONLY one authentication method. Values are cookie contents, not headers.
 [env]
 # Method A: Bearer accessToken from https://chatgpt.com/api/auth/session
+# Bearer takes precedence. Clear it to use cookies; expired bearers do not fall back.
 CHATGPT_ACCESS_TOKEN = ""
 # Method B: one __Secure-next-auth.session-token cookie
 CHATGPT_SESSION_TOKEN = ""
@@ -21,7 +22,13 @@ CHATGPT_EXPORT_FORMAT = "json"
 # Absolute paths and ~ are supported; relative paths are repository-relative under mise.
 CHATGPT_OUTPUT_DIR = "chatgpt_export"
 # Example: CHATGPT_OUTPUT_DIR = "~/Documents/ChatGPT/personal"
-# Generate a local HTML index automatically after export/import.
+# Generate index.html and .chatgpt-index/chats/ automatically after export/import.
+# Set false or pass --no-index to disable; original JSON/Markdown is unchanged.
 CHATGPT_BUILD_INDEX = "true"
+# Rebuild the configured directory without exporting/authenticating: mise run index
+# Any existing export directory: mise run index -- /path/to/previous/export
+# Relative links work directly in a browser; no server required.
+CHATGPT_PAGE_SIZE = "100"
 CHATGPT_REQUEST_DELAY = "1"
 CHATGPT_TIMEOUT = "30"
+CHATGPT_MAX_RETRIES = "5"

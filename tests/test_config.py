@@ -1,5 +1,7 @@
 import json
-from dataclasses import replace
+import tomllib
+from dataclasses import fields, replace
+from pathlib import Path
 
 import pytest
 
@@ -76,3 +78,13 @@ def test_credentials_not_in_config_repr():
     )
     assert "fake-access-secret" not in repr(config)
     assert "fake-cookie-secret" not in repr(config)
+
+
+def test_example_documents_every_config_field_with_matching_defaults():
+    env = tomllib.loads((Path(__file__).parents[1] / "mise.local.toml.example").read_text())["env"]
+    expected = {
+        "CHATGPT_EXPORT_FORMAT" if item.name == "output_format" else f"CHATGPT_{item.name.upper()}"
+        for item in fields(Config)
+    }
+    assert set(env) == expected
+    assert Config.from_env(env) == Config()

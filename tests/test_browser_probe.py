@@ -90,14 +90,36 @@ def test_download_is_valid_mise_toml_and_report_stays_redacted(workspace):
         "CHATGPT_ACCESS_TOKEN": options["token"],
         "CHATGPT_WORKSPACE_ID": workspace,
         "CHATGPT_OUTPUT_DIR": options["outputDir"],
+        "CHATGPT_BUILD_INDEX": "true",
     }
     config = Config.from_env(env)
     assert config.access_token == options["token"]
     assert config.workspace_id == workspace
     assert config.output_dir == Path(options["outputDir"])
+    assert config.build_index
     assert options["token"] not in json.dumps(result["report"])
     assert result["removed"] == result["revoked"] == 1
     assert len(result["requests"]) == 4
+
+
+def test_download_documents_output_index_projects_and_cookie_alternatives():
+    result, _ = probe()
+    text = result["downloads"][0]
+    for expected in (
+        "mise run index -- /path/to/previous/export",
+        "index.html",
+        ".chatgpt-index/chats/",
+        "CHATGPT_AUTO_PROJECTS",
+        "CHATGPT_PROJECTS",
+        "CHATGPT_SESSION_TOKEN_0",
+        "CHATGPT_SESSION_TOKEN_1",
+        "HttpOnly",
+        "no automatic fallback",
+    ):
+        assert expected in text
+    example = tomllib.loads((PROBE.parents[1] / "mise.local.toml.example").read_text())["env"]
+    generated = tomllib.loads(text)["env"]
+    assert set(generated) <= set(example)
 
 
 def test_declining_download_still_returns_redacted_probe():

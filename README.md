@@ -40,13 +40,13 @@ Choose one authentication method in that file:
 - **Single session cookie:** copy `__Secure-next-auth.session-token` from browser DevTools → Application → Cookies → `https://chatgpt.com` into `CHATGPT_SESSION_TOKEN`.
 - **Split cookies:** copy `.0` and `.1` values into `CHATGPT_SESSION_TOKEN_0` and `CHATGPT_SESSION_TOKEN_1`. A single cookie in `_0` is also accepted for compatibility.
 
-Bearer authentication takes precedence; a single cookie takes precedence over split cookies. Tokens expire. An OpenAI Platform API key (`sk-…`) is **not** a ChatGPT web session token.
+Bearer authentication takes precedence; a single cookie takes precedence over split cookies. Tokens expire. There is no automatic fallback from an expired bearer token: rerun the helper to refresh it, or clear `CHATGPT_ACCESS_TOKEN` to use cookie-based session exchange. An OpenAI Platform API key (`sk-…`) is **not** a ChatGPT web session token.
 
 ### Generate the local TOML from your browser
 
-Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, and `CHATGPT_OUTPUT_DIR`. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
+Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, `CHATGPT_OUTPUT_DIR`, and `CHATGPT_BUILD_INDEX`. Comments explain standalone index rebuilding, automatic project discovery, optional project overrides, and manually copied single/split-cookie alternatives. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
 
-The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, replace only those three keys under the existing `[env]` in `mise.local.toml`**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
+The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, merge those four keys under the existing `[env]` in `mise.local.toml` (keep your chosen `CHATGPT_BUILD_INDEX` value if already customized)**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
 
 ```sh
 chmod 600 mise.local.toml
