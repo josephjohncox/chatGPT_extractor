@@ -102,6 +102,20 @@ For a Business/Team/Enterprise workspace:
 
 Do not use a `g-p-…` project ID or paste a URL into this field. If no account header is present, leave it blank and check the probe result rather than guessing an ID. Use a separate output directory per workspace.
 
+## Match the browser's User-Agent
+
+The exporter uses `CHATGPT_USER_AGENT` for both session exchange and backend requests. Its default is a desktop Chrome string. The browser helper copies your actual `navigator.userAgent` into the downloaded TOML automatically.
+
+To set it manually, evaluate this in Developer Tools → Console on the signed-in ChatGPT tab:
+
+```js
+navigator.userAgent
+```
+
+Copy that string value, without the console's surrounding quotes, into `CHATGPT_USER_AGENT` under the existing `[env]` in your private file. Do not include the `User-Agent:` header name. This field may contain semicolons and spaces, but not line breaks.
+
+A controlled live test changed only this header: the old generic `Mozilla/5.0` received a 403 challenge, the desktop Chrome value received 200, and restoring the generic header restored 403. Matching the User-Agent resolved that failure; it does not reproduce the browser's entire network context or guarantee access in every environment.
+
 ## 4. Check authentication without exporting
 
 Save `mise.local.toml`. From the repository on macOS/Linux, run:
@@ -130,7 +144,7 @@ A bearer token avoids copying session-cookie parts. It can expire independently;
 6. If your repository already has `mise.local.toml`, merge the downloaded keys into its existing `[env]`. Keep unrelated settings and any intentional index-generation preference. On a fresh checkout, use the downloaded file as the local file.
 7. Run the authentication check above. Delete any redundant downloaded credential file after saving the values locally.
 
-The downloaded comments document output/index settings and the manual cookie alternatives. The console report stays redacted. Generating a token in the browser does not prove it will work outside that browser.
+The download also copies `navigator.userAgent` into `CHATGPT_USER_AGENT`. Its comments document output/index settings and the manual cookie alternatives. The console report stays redacted. Generating a token in the browser does not prove it will work outside that browser.
 
 ### Copy a bearer token manually
 
@@ -153,7 +167,7 @@ Replace `accessToken-field-value` with the actual value, save the file, and run 
 - **Missing `.0` or invalid characters:** copy the complete Value cell again. Keep cookie names, header prefixes, whitespace, and screenshots out of the TOML values.
 - **An old bearer token still takes precedence:** clear `CHATGPT_ACCESS_TOKEN` before testing cookies. If a single-cookie value remains, clear it before testing split cookies.
 - **HTTP 401 or expired credentials:** sign in again if necessary, then replace all values for the chosen method from the same current browser session. There is no fixed lifetime assumed by the exporter.
-- **HTTP 403 or “Just a moment…”:** this can be browser/Cloudflare gating, a workspace/access restriction, or rejected credentials. It does not by itself prove expiry. Check sign-in and the account header; use the helper from the normal signed-in tab for a browser-side diagnostic. A fresh token is not a guaranteed fix.
+- **HTTP 403 or “Just a moment…”:** this can be browser/Cloudflare gating, a workspace/access restriction, or rejected credentials. It does not by itself prove expiry. Check `CHATGPT_USER_AGENT` against `navigator.userAgent` first, then sign-in and the account header. Use the helper from the normal signed-in tab for a browser-side diagnostic. A fresh token is not a guaranteed fix.
 
 ### If the CLI detects a Cloudflare browser challenge
 
@@ -161,9 +175,9 @@ The CLI reports this only when the server sends `cf-mitigated: challenge`, Cloud
 
 1. Run `scripts/probe-chatgpt.js` in your normal signed-in ChatGPT tab, as described above.
 2. Check the redacted report. The authentication fields include `status`, `browser_challenge`, and `has_access_token`; backend entries also include `browser_challenge`.
-3. If the browser receives a token, accept the credential-file download and copy its `CHATGPT_ACCESS_TOKEN` into the existing private file. This changes the CLI to bearer mode and skips `/api/auth/session`; it does not prove the backend is accessible from Python.
-4. Run `mise run probe` again. Confirm `token_source` is `configured_bearer`. If the backend requests also report a browser challenge, the HTTP-only CLI is still blocked. Recopying session cookies is not an established fix. A browser-context export adapter would be required for that path; this repository does not yet provide one.
+3. Accept the credential-file download and merge `CHATGPT_USER_AGENT` into the existing private file. Keep cookie authentication if preferred. Copying `CHATGPT_ACCESS_TOKEN` as well selects bearer mode and skips the cookie exchange, but is not required for the User-Agent correction.
+4. Run `mise run probe` again. Both cookie-only and bearer modes passed the live checks after the header correction. If a challenge persists with a matching header and current credentials, share the redacted report for a browser-versus-CLI comparison. A different transport may be needed in some environments, but the challenge header alone does not prove that.
 
-Share only the inspected, redacted report if further diagnosis is needed, never the downloaded TOML or session response. No challenge solver, speculative browser impersonation, or automatic fallback is applied.
+Share only the inspected, redacted report if further diagnosis is needed, never the downloaded TOML or session response. The User-Agent setting changes only that HTTP header. No browser automation, TLS impersonation, challenge solver, or automatic credential fallback is applied.
 
 You can still browse previous exports with `mise run index` or import a downloaded archive without web authentication.

@@ -25,6 +25,7 @@ const source = fs.readFileSync(0, 'utf8');
 const output = { downloads: [], requests: [], confirmations: 0, removed: 0, revoked: 0 };
 const context = {
   location: { origin: 'https://chatgpt.com' },
+  navigator: { userAgent: 'Mozilla/5.0 FixtureChrome/123' },
   prompt: message => message.startsWith('Export output directory') ? options.outputDir : options.workspace,
   confirm: () => { output.confirmations++; return options.download; },
   fetch: async (path, config) => {
@@ -92,12 +93,14 @@ def test_download_is_valid_mise_toml_and_report_stays_redacted(workspace):
         "CHATGPT_WORKSPACE_ID": workspace,
         "CHATGPT_OUTPUT_DIR": options["outputDir"],
         "CHATGPT_BUILD_INDEX": "true",
+        "CHATGPT_USER_AGENT": "Mozilla/5.0 FixtureChrome/123",
     }
     config = Config.from_env(env)
     assert config.access_token == options["token"]
     assert config.workspace_id == workspace
     assert config.output_dir == Path(options["outputDir"])
     assert config.build_index
+    assert config.user_agent == "Mozilla/5.0 FixtureChrome/123"
     assert options["token"] not in json.dumps(result["report"])
     assert result["removed"] == result["revoked"] == 1
     assert len(result["requests"]) == 4

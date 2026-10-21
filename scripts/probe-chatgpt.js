@@ -75,6 +75,8 @@
       "[env]",
       `CHATGPT_ACCESS_TOKEN = ${tomlString(session.accessToken)}`,
       `CHATGPT_WORKSPACE_ID = ${tomlString(workspace)}`,
+      "# Match the browser's User-Agent for CLI requests; this does not copy its full network context.",
+      `CHATGPT_USER_AGENT = ${tomlString(navigator.userAgent)}`,
       "# Export/import destination and default source for the offline index.",
       "# Supports absolute paths, ~, and repository-relative paths under mise.",
       `CHATGPT_OUTPUT_DIR = ${tomlString(outputDirectory)}`,

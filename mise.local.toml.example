@@ -23,6 +23,10 @@ CHATGPT_SESSION_TOKEN_0 = ""
 CHATGPT_SESSION_TOKEN_1 = ""
 # Account header from a backend-api request; blank for personal/default account.
 CHATGPT_WORKSPACE_ID = ""
+# Use the same browser identity header as the signed-in tab; the helper fills this automatically.
+# To copy manually, evaluate navigator.userAgent in that tab and copy the string value.
+# This is a User-Agent header only, not a complete browser transport or challenge solver.
+CHATGPT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.8059.85 Safari/537.36"
 # Optional overrides/additions, not required with automatic project discovery.
 CHATGPT_PROJECTS = '[]'
 # Example: [["g-p-0123456789abcdef0123456789abcdef", "Research"]]

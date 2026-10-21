@@ -39,7 +39,21 @@ These sources are implementation leads, not guarantees or live evidence for this
 
 A subsequent session-only repro returned 403 twice. A credential-safe inspection confirmed that the selected request uses both `.0` and `.1` cookies, no single-cookie override, and no workspace header. The response carries **`cf-mitigated: challenge`** and HTML content rather than JSON. This positively identifies a Cloudflare browser challenge on the Python session request; it does not determine whether the cookie values would be accepted after that challenge. The CLI now detects this explicit header without printing response bodies, and the browser helper reports a `browser_challenge` flag plus token-presence status.
 
-An unclassified HTTP 403 alone cannot distinguish expired credentials from access restrictions or browser gating. The isolated Chrome result does not prove the user's normal browser is blocked. No authenticated UI, project listing, conversation-detail response, or full live export has been validated. No content was generated, changed, or deleted in ChatGPT, and no bulk download was started.
+An unclassified HTTP 403 alone cannot distinguish expired credentials from access restrictions or browser gating. The isolated Chrome result does not prove the user's normal browser is blocked. These initial observations did not establish the cause of the challenge. They were superseded by the controlled User-Agent comparison below. No content was generated, changed, or deleted in ChatGPT, and no bulk download was started.
+
+### Controlled User-Agent comparison and correction
+
+Using the same endpoint, credentials, and request headers except User-Agent, a three-request comparison produced:
+
+| User-Agent | HTTP status | Challenge header |
+|---|---|---|
+| Generic `Mozilla/5.0` | 403 | present |
+| Desktop Chrome string matching the installed Chrome version | 200 | absent |
+| Generic `Mozilla/5.0` again | 403 | present |
+
+The generic header was therefore a sufficient trigger in this comparison. It was premature to conclude that a browser-context exporter was necessarily required. The client now defaults to the tested desktop Chrome string and exposes `CHATGPT_USER_AGENT`; the browser helper copies `navigator.userAgent` automatically. This changes only a request header, not TLS behavior or the rest of the transport.
+
+After the correction, normal `mise run probe` returned 200 for conversations, project sidebar, and settings in configured-bearer mode. A separate probe with the bearer token removed in memory (without modifying the private file) completed split-cookie session exchange and returned 200 for the same three backend endpoints. Full sidebar cursor pagination also completed, and one conversation-detail request returned a mapping and current node. No bulk conversation export was started. One earlier project-listing trial was still challenged before subsequent successful checks; this is not a universal or permanent guarantee.
 
 ## Local verification
 
@@ -47,8 +61,8 @@ An unclassified HTTP 403 alone cannot distinguish expired credentials from acces
 
 ## Remaining live gate
 
-Run `scripts/probe-chatgpt.js` in DevTools on the user's normal signed-in `https://chatgpt.com` tab. Its console report contains only statuses and response shapes. Supply the active workspace account ID if needed. After the checks, an explicit confirmation can download `mise.local.toml` containing the browser's bearer token, the supplied workspace ID, a prompted export output directory, and an explicit `CHATGPT_BUILD_INDEX` setting with usage comments; this credential file is separate from the redacted report and must stay private. Merge its four active keys into an existing local file, preserving other settings and any intentional index-generation preference, then set permissions to 0600. Compare the project nesting/pagination fields with the adapter and add sanitized fixtures for any new shapes. Do not share tokens, cookies, session JSON, raw HAR files, or conversation bodies.
+Run `scripts/probe-chatgpt.js` in DevTools on the user's normal signed-in `https://chatgpt.com` tab. Its console report contains only statuses and response shapes. Supply the active workspace account ID if needed. After the checks, an explicit confirmation can download `mise.local.toml` containing the browser's bearer token, the supplied workspace ID, the browser's `navigator.userAgent` as `CHATGPT_USER_AGENT`, a prompted export output directory, and an explicit `CHATGPT_BUILD_INDEX` setting with usage comments; this credential file is separate from the redacted report and must stay private. Merge its five active keys into an existing local file, preserving other settings and any intentional index-generation preference, then set permissions to 0600. Compare the project nesting/pagination fields with the adapter and add sanitized fixtures for any new shapes. Do not share tokens, cookies, session JSON, raw HAR files, or conversation bodies.
 
-If a fresh web bearer token works outside the browser, store it only in `mise.local.toml`, rerun `mise run probe`, then perform a deliberately scoped export to a separate ignored output directory. If browser gating persists, use a downloaded official export where available; a browser-side export adapter remains future work. Refreshing tokens or adding speculative headers is not proof of compatibility.
+Keep the configured User-Agent aligned with the signed-in browser, rerun `mise run probe`, then perform a deliberately scoped export to a separate ignored output directory before a full account export. If challenges persist, compare one request variable at a time; a separate browser-context adapter is not implemented and should not be assumed necessary from a challenge response alone. Refreshing tokens without isolating the request difference is not proof of a fix.
 
-**Confidence:** high that the observed Python session request is receiving an explicit Cloudflare browser challenge, and in the offline behavior covered by tests. Cookie validity beyond that challenge and authenticated backend compatibility remain unverified. A corrected error classification is not a fix for live browser gating.
+**Confidence:** high that changing the generic User-Agent resolved the observed live session/backend failure in the controlled comparison, with successful bearer and cookie-only probes, sidebar pagination, and one detail request. Full bulk-export completeness, all workspace/plan variants, and future challenge behavior remain unqualified.

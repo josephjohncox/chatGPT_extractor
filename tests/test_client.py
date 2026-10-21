@@ -78,6 +78,29 @@ def test_session_cloudflare_challenge_is_explicit_and_body_stays_private(capsys)
     assert capsys.readouterr().out == ""
 
 
+def test_default_user_agent_is_desktop_chrome_not_generic():
+    headers = client(Transport()).headers()
+    assert "Chrome/" in headers["User-Agent"]
+    assert headers["User-Agent"] != "Mozilla/5.0"
+
+
+def test_configured_user_agent_is_used_by_session_and_backend_headers():
+    custom = "Mozilla/5.0 CustomBrowser/123"
+    transport = Transport(response({"accessToken": "fake-access"}), response({"items": []}))
+    config = Config.from_env(
+        {
+            "CHATGPT_USER_AGENT": custom,
+            "CHATGPT_SESSION_TOKEN": "fake-cookie",
+            "CHATGPT_REQUEST_DELAY": "0",
+        }
+    )
+    instance = ChatGPTClient(config, transport)
+    token = instance.access_token()
+    assert instance.json("conversations", token, label="test") == {"items": []}
+    assert len(transport.calls) == 2
+    assert all(call[1]["headers"]["User-Agent"] == custom for call in transport.calls)
+
+
 def test_access_token_does_not_exchange_session():
     transport = Transport()
     assert client(transport, access_token="fake-access").access_token() == "fake-access"

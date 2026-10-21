@@ -25,14 +25,15 @@ class HTTPError(ExportError):
             explanation = "Cloudflare browser challenge detected (cf-mitigated: challenge). This is not a verdict on cookie validity."
             if label == "session authentication":
                 action = (
-                    " Run scripts/probe-chatgpt.js in your normal signed-in ChatGPT tab and use its "
-                    "CHATGPT_ACCESS_TOKEN to skip this cookie-exchange request. Retry mise run probe. "
+                    " Run scripts/probe-chatgpt.js in your normal signed-in ChatGPT tab and match its "
+                    "CHATGPT_USER_AGENT. Its CHATGPT_ACCESS_TOKEN can skip this cookie-exchange request. Retry mise run probe. "
                     "Backend requests may still be challenged."
                 )
             else:
                 action = (
                     " This backend request is browser-gated even if a bearer token was supplied. "
-                    "Use scripts/probe-chatgpt.js in your normal signed-in tab for a browser-side comparison. "
+                    "Match CHATGPT_USER_AGENT to navigator.userAgent using scripts/probe-chatgpt.js, then retry. "
+                    "Use that helper in your normal signed-in tab for a browser-side comparison if challenges persist. "
                     "Offline import/index remain available; bearer tokens do not solve browser challenges."
                 )
             super().__init__(f"{label}: HTTP {status}. {explanation}{action}")
@@ -66,7 +67,7 @@ class ChatGPTClient:
     def headers(self, token: str = "") -> dict[str, str]:
         headers = {
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent": self.config.user_agent,
             "Referer": "https://chatgpt.com/",
         }
         if token:

@@ -4,7 +4,7 @@ Private derivative of [richlow/chatGPT_extractor](https://github.com/richlow/cha
 
 Export ChatGPT web conversations to raw JSON (default) or Markdown, grouped by project. Or convert a downloaded ChatGPT data export **offline**, without credentials or network access.
 
-**Live compatibility is not yet verified for this account.** The session endpoint returned HTTP 403, and an isolated Chrome visit reached Cloudflare's challenge page. The web mode uses undocumented endpoints; no claim of universal plan support is made. See [API and UI investigation](docs/api-compatibility.md).
+**Live checks now pass with a desktop-browser User-Agent:** session exchange, regular listing, full project-sidebar pagination, user settings, and one conversation-detail response were verified. The earlier generic `Mozilla/5.0` header received Cloudflare challenges. Full bulk-export coverage and universal plan support are not claimed; these endpoints remain undocumented. See [API and UI investigation](docs/api-compatibility.md).
 
 ## Setup: mise + uv
 
@@ -46,9 +46,9 @@ Bearer authentication takes precedence; a single cookie takes precedence over sp
 
 ### Generate the local TOML from your browser
 
-Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, `CHATGPT_OUTPUT_DIR`, and `CHATGPT_BUILD_INDEX`. Comments explain standalone index rebuilding, automatic project discovery, optional project overrides, and manually copied single/split-cookie alternatives. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
+Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, `CHATGPT_USER_AGENT` (copied from `navigator.userAgent`), `CHATGPT_OUTPUT_DIR`, and `CHATGPT_BUILD_INDEX`. Comments explain standalone index rebuilding, automatic project discovery, optional project overrides, and manually copied single/split-cookie alternatives. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
 
-The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, merge those four keys under the existing `[env]` in `mise.local.toml` (keep your chosen `CHATGPT_BUILD_INDEX` value if already customized)**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
+The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, merge those five keys under the existing `[env]` in `mise.local.toml` (keep your chosen `CHATGPT_BUILD_INDEX` value if already customized)**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
 
 ```sh
 chmod 600 mise.local.toml
@@ -60,7 +60,7 @@ Delete any redundant download after saving the token locally. Do not share or co
 
 For a managed workspace, copy the `ChatGPT-Account-ID` header from a backend-api request in your browser into `CHATGPT_WORKSPACE_ID`. Use a separate output directory per workspace. A workspace ID is not a project ID.
 
-This working checkout's previously embedded cookies and explicit project list were migrated to the private local file. They are not in the committed example. The existing cookie values have not been proven usable.
+This working checkout's previously embedded cookies and explicit project list were migrated to the private local file. They are not in the committed example. Both bearer mode and split-cookie-only mode have since passed live probes with the corrected User-Agent; keep credentials current.
 
 ## Choose the output directory
 
@@ -108,7 +108,9 @@ To request a supported ChatGPT export, open **Settings → Data controls → Exp
 
 ### If the HTTP probe gets 403
 
-403 can mean invalid credentials, a workspace/access restriction, or browser/Cloudflare gating. If the response includes `cf-mitigated: challenge`, the CLI identifies a **Cloudflare browser challenge** explicitly; this does not establish that your cookie values are wrong. Refreshing a token is not guaranteed to fix it. The tool does not try to solve or bypass challenges. See the [challenge diagnosis steps](docs/authentication.md#if-the-cli-detects-a-cloudflare-browser-challenge). A bearer token from the helper skips the cookie-exchange request, but backend requests may still be challenged.
+First match `CHATGPT_USER_AGENT` to your signed-in browser; the helper copies it automatically. A controlled comparison reproduced **403 → 200 → 403** by changing only the User-Agent between the old generic `Mozilla/5.0` and a desktop Chrome string. The default has been corrected. This resolved the observed session and backend failures without a separate browser exporter.
+
+If a response still includes `cf-mitigated: challenge`, the CLI identifies it explicitly. That indicator alone does not establish invalid credentials or prove that a browser transport is required. Other challenge causes and account restrictions remain possible; there is no universal User-Agent fix or challenge solver. See the [diagnosis steps](docs/authentication.md#if-the-cli-detects-a-cloudflare-browser-challenge).
 
 For a check from your real signed-in browser, paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on `https://chatgpt.com`. It makes read-only requests using the browser session and returns status codes, field names, types, and counts, not token values or conversation bodies. It prompts for the optional workspace account ID and, afterward, offers a private credential-file download as described above. Inspect the small report before sharing it; never share the downloaded TOML. This is a diagnostic, not a conversation exporter.
 
@@ -122,6 +124,7 @@ All of these can go under `[env]` in `mise.local.toml`:
 | `CHATGPT_SESSION_TOKEN` | empty | Single session cookie |
 | `CHATGPT_SESSION_TOKEN_0`, `_1` | empty | Split cookie parts (or single cookie in `_0`) |
 | `CHATGPT_WORKSPACE_ID` | empty | Optional `ChatGPT-Account-ID` |
+| `CHATGPT_USER_AGENT` | Desktop Chrome string; see example | HTTP User-Agent for session and backend requests; helper copies `navigator.userAgent` |
 | `CHATGPT_PROJECTS` | `[]` | JSON array of `[project_id_or_url, folder_name]` overrides/additions |
 | `CHATGPT_AUTO_PROJECTS` | `true` | Discover personal/shared projects via the sidebar endpoint |
 | `CHATGPT_INCLUDE_ARCHIVED` | `false` | Also query the regular archived-conversation listing |

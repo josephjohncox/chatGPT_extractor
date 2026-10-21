@@ -8,6 +8,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.8059.85 Safari/537.36"
+)
+
 
 class ConfigError(ValueError):
     """Invalid configuration without including credential values in diagnostics."""
@@ -51,6 +56,7 @@ class Config:
     session_token_1: str = field(default="", repr=False)
     access_token: str = field(default="", repr=False)
     workspace_id: str = ""
+    user_agent: str = DEFAULT_USER_AGENT
     projects: tuple[tuple[str, str], ...] = ()
     output_dir: Path = Path("chatgpt_export")
     output_format: str = "json"
@@ -107,9 +113,21 @@ class Config:
         workspace = env.get("CHATGPT_WORKSPACE_ID", "").strip()
         if workspace and not re.fullmatch(r"[a-zA-Z0-9_-]+", workspace):
             raise ConfigError("CHATGPT_WORKSPACE_ID must be an account ID, not a URL or header")
+        user_agent = env.get("CHATGPT_USER_AGENT", DEFAULT_USER_AGENT).strip()
+        if not user_agent or any(ord(char) < 32 or ord(char) == 127 for char in user_agent):
+            raise ConfigError(
+                "CHATGPT_USER_AGENT must be a nonempty HTTP header value without control characters"
+            )
+        try:
+            user_agent.encode("latin-1")
+        except UnicodeEncodeError:
+            raise ConfigError(
+                "CHATGPT_USER_AGENT must be an HTTP header value; copy navigator.userAgent from your browser"
+            ) from None
         return cls(
             **secrets,
             workspace_id=workspace,
+            user_agent=user_agent,
             projects=tuple(projects),
             output_dir=output_directory(env.get("CHATGPT_OUTPUT_DIR", "chatgpt_export")),
             output_format=output_format,
