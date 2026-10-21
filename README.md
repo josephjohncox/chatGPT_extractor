@@ -42,6 +42,20 @@ Choose one authentication method in that file:
 
 Bearer authentication takes precedence; a single cookie takes precedence over split cookies. Tokens expire. An OpenAI Platform API key (`sk-…`) is **not** a ChatGPT web session token.
 
+### Generate the local TOML from your browser
+
+Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml** to save a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN` and `CHATGPT_WORKSPACE_ID`. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
+
+The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, replace only those two keys under the existing `[env]` in `mise.local.toml`**, preserving project and output settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
+
+```sh
+chmod 600 mise.local.toml
+mise trust mise.local.toml
+mise run probe
+```
+
+Delete any redundant download after saving the token locally. Do not share or commit the credential file. Generating it does not prove the token will work outside the browser.
+
 For a managed workspace, copy the `ChatGPT-Account-ID` header from a backend-api request in your browser into `CHATGPT_WORKSPACE_ID`. Use a separate output directory per workspace. A workspace ID is not a project ID.
 
 This working checkout's previously embedded cookies and explicit project list were migrated to the private local file. They are not in the committed example. The existing cookie values have not been proven usable.
@@ -77,7 +91,7 @@ To request a supported ChatGPT export, open **Settings → Data controls → Exp
 
 403 can mean invalid credentials, a workspace/access restriction, or browser/Cloudflare gating. Refreshing a token is not guaranteed to fix it. The tool does not try to solve or bypass challenges.
 
-For a check from your real signed-in browser, paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on `https://chatgpt.com`. It makes read-only requests using the browser session and returns status codes, field names, types, and counts, not token values or conversation bodies. It prompts for the optional workspace account ID. Inspect the small report before sharing it. This is a diagnostic, not a browser exporter.
+For a check from your real signed-in browser, paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on `https://chatgpt.com`. It makes read-only requests using the browser session and returns status codes, field names, types, and counts, not token values or conversation bodies. It prompts for the optional workspace account ID and, afterward, offers a private credential-file download as described above. Inspect the small report before sharing it; never share the downloaded TOML. This is a diagnostic, not a conversation exporter.
 
 ## Configuration
 

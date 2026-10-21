@@ -1,6 +1,7 @@
 // Paste this entire file into DevTools on your signed-in https://chatgpt.com tab.
-// Read-only: no chat creation, changes, downloads, external hosts, or body logging.
-// The return value contains status codes, field names, and counts only.
+// Read-only requests: no chat creation, changes, external hosts, or body logging.
+// Optionally download credentials as mise.local.toml after an explicit confirmation.
+// The return value remains redacted; NEVER share the downloaded credential file.
 (async () => {
   if (location.origin !== "https://chatgpt.com") {
     throw new Error("Run this only on https://chatgpt.com");
@@ -9,7 +10,7 @@
   const sessionResponse = await fetch("/api/auth/session", { credentials: "include" });
   report.authentication = { status: sessionResponse.status };
   const session = await sessionResponse.json().catch(() => ({}));
-  if (!sessionResponse.ok || typeof session.accessToken !== "string") {
+  if (!sessionResponse.ok || typeof session.accessToken !== "string" || !session.accessToken) {
     return report;
   }
   const workspace = prompt("ChatGPT-Account-ID for the workspace to check (blank for personal/default):", "");
@@ -39,6 +40,41 @@
     } catch {
       report.endpoints[path] = { error: "Request failed (details withheld)" };
     }
+  }
+  if (confirm(
+    "Download mise.local.toml containing your secret ChatGPT access token and the workspace ID you entered? " +
+    "Keep this file private. It will not replace your repository's existing local config automatically."
+  )) {
+    // JSON basic-string escaping is also valid TOML for these credential values.
+    const tomlString = (value) => JSON.stringify(value).replace(
+      /[\u007f-\u009f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
+    );
+    const toml = [
+      "# PRIVATE: contains a ChatGPT bearer token. Do not commit or share.",
+      "# If mise.local.toml already exists, replace only these two keys under its [env].",
+      "# Preserve your existing project/output settings. Do not add a second [env] table.",
+      "# After saving in your repository: chmod 600 mise.local.toml",
+      "[env]",
+      `CHATGPT_ACCESS_TOKEN = ${tomlString(session.accessToken)}`,
+      `CHATGPT_WORKSPACE_ID = ${tomlString(workspace)}`,
+      "",
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([toml], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    try {
+      link.href = url;
+      link.download = "mise.local.toml";
+      document.body.appendChild(link);
+      link.click();
+      report.credential_file = "download_requested";
+    } catch {
+      report.credential_file = "download_failed";
+    } finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  } else {
+    report.credential_file = "declined";
   }
   return report;
 })();
