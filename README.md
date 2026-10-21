@@ -2,7 +2,7 @@
 
 Private derivative of [richlow/chatGPT_extractor](https://github.com/richlow/chatGPT_extractor), retaining the upstream Git history and MIT license. GitHub does not support making a public repository's fork private, so this is an independent private repository, not a GitHub fork-network member.
 
-Export ChatGPT web conversations to raw JSON (default) or Markdown, grouped by project. Or convert a downloaded ChatGPT data export **offline**, without credentials or network access.
+Snapshot ChatGPT conversations plus available memories, custom instructions, and account/settings data by default. Conversations are raw JSON (default) or Markdown, grouped by project; auxiliary snapshots remain JSON. See [default snapshot contents and opt-out](docs/snapshots.md). Or convert a downloaded ChatGPT data export **offline**, without credentials or network access.
 
 **Live checks now pass with a desktop-browser User-Agent:** session exchange, regular listing, full project-sidebar pagination, user settings, and one conversation-detail response were verified. The earlier generic `Mozilla/5.0` header received Cloudflare challenges. Full bulk-export coverage and universal plan support are not claimed; these endpoints remain undocumented. See [API and UI investigation](docs/api-compatibility.md).
 
@@ -46,9 +46,9 @@ Bearer authentication takes precedence; a single cookie takes precedence over sp
 
 ### Generate the local TOML from your browser
 
-Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, `CHATGPT_USER_AGENT` (copied from `navigator.userAgent`), `CHATGPT_OUTPUT_DIR`, and `CHATGPT_BUILD_INDEX`. Comments explain standalone index rebuilding, automatic project discovery, optional project overrides, and manually copied single/split-cookie alternatives. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
+Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, `CHATGPT_USER_AGENT` (copied from `navigator.userAgent`), `CHATGPT_OUTPUT_DIR`, `CHATGPT_BUILD_INDEX`, and `CHATGPT_AUXILIARY`. Comments explain standalone index rebuilding, automatic project discovery, optional project overrides, and manually copied single/split-cookie alternatives. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
 
-The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, merge those five keys under the existing `[env]` in `mise.local.toml` (keep your chosen `CHATGPT_BUILD_INDEX` value if already customized)**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
+The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, merge those six keys under the existing `[env]` in `mise.local.toml` (keep intentional `CHATGPT_BUILD_INDEX` or `CHATGPT_AUXILIARY` overrides if already customized)**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
 
 ```sh
 chmod 600 mise.local.toml
@@ -79,11 +79,14 @@ Absolute paths, `~`, and relative paths are supported. With mise tasks, relative
 # Read-only authentication and response-shape check; no conversation bodies logged.
 mise run probe
 
-# Discover projects and export conversations as JSON.
+# Default snapshot: conversations, available memories/settings, and local HTML.
 mise run export
 
-# Markdown instead; optional memories/settings snapshots.
-mise run export -- --format markdown --auxiliary
+# Markdown conversations; auxiliary data still uses JSON.
+mise run export -- --format markdown
+
+# Explicitly export conversations only (plus local HTML).
+mise run export -- --no-auxiliary
 
 # Ignore the incremental index and refetch everything.
 mise run export -- --refresh
@@ -131,6 +134,7 @@ All of these can go under `[env]` in `mise.local.toml`:
 | `CHATGPT_OUTPUT_DIR` | `chatgpt_export` | Export/import destination and default offline-index directory; supports `~` |
 | `CHATGPT_BUILD_INDEX` | `true` | Automatically build HTML after export/import; `--no-index` also disables it |
 | `CHATGPT_PROGRESS` | `true` | Rich terminal progress or timestamped redirected logs on stderr; `--no-progress` disables it |
+| `CHATGPT_AUXILIARY` | `true` | Include available memories/instructions/settings in web exports; `--no-auxiliary` disables, `--auxiliary` forces inclusion |
 | `CHATGPT_EXPORT_FORMAT` | `json` | `json` or `markdown` |
 | `CHATGPT_PAGE_SIZE` | `100` | Regular listing page size, 1–100 |
 | `CHATGPT_REQUEST_DELAY` | `1` | Minimum seconds between requests |
@@ -153,14 +157,14 @@ Progress is enabled by default for `export`, `import`, `index`, and `probe`. Ter
 Reporting covers authentication, regular/archived pages, project-discovery pages, per-project conversation listings, deduplicated totals, saved/skipped/failed/pending conversations, bytes written, HTTP attempts/status/response sizes, pacing/backoff, each auxiliary endpoint, directory scans, chat-page rendering, and catalog writing. Unknown cursor/scan totals stay indeterminate rather than showing a made-up percentage. ETAs are estimates.
 
 ```sh
-# Conversations, optional snapshots, then local HTML; all stages report progress.
-mise run export -- --auxiliary
+# Default conversations + auxiliary snapshots + local HTML; all stages report progress.
+mise run export
 
 # Preserve the JSON result while retaining human-readable progress:
 mise run probe > probe-result.json
 
 # Suppress progress only; final results and errors remain:
-mise run export -- --auxiliary --no-progress
+mise run export -- --no-progress
 ```
 
 You can also set `CHATGPT_PROGRESS = "false"` under the existing `[env]` in private `mise.local.toml`. Chat titles, project names/IDs, credentials, and response bodies are not included in progress. Auxiliary progress counts **endpoint snapshots**, not individual memories or proof of a complete account backup.
@@ -178,7 +182,7 @@ chatgpt_export/
 │   └── Title--<conversation-id-hash>.json
 ├── Research--<project-id-hash>/
 │   └── Title--<conversation-id-hash>.json
-├── auxiliary-status.json                 # only with --auxiliary
+├── auxiliary-status.json                 # default web export; opt out with --no-auxiliary
 ├── memories/memories.json                # if available
 └── settings/…                            # if available
 ```
@@ -188,7 +192,7 @@ chatgpt_export/
 - Writes are atomic and files are owner-readable/writable only on POSIX. New output folders use mode 0700. Existing directory permissions are not changed.
 - Raw JSON retains all branches and structured content. Markdown follows `current_node` ancestry; older archives without it fall back to the first-child branch. Markdown notes non-text content but does not download attachments, images, audio, or project files.
 - Renamed/moved conversations produce a new path; old files are retained, not deleted. Existing exports using the original filename scheme are also left untouched and are not trusted as an incremental index.
-- Broken pagination/listing fails rather than reporting a partial listing as success. Individual unavailable conversations produce a nonzero exit; 401/403 stops the export. Optional auxiliary endpoint failures are recorded in `auxiliary-status.json`, without replacing a previous valid snapshot with an error payload.
+- Broken pagination/listing fails rather than reporting a partial listing as success. Individual unavailable conversations produce a nonzero exit; required-request 401/403 stops the export. Auxiliary snapshots are enabled by default: inaccessible endpoints (plain 403/404/405) are recorded as unavailable and do not prevent the remaining checks. A 401 or explicit browser challenge still stops the run. Earlier valid snapshots are not replaced by error payloads.
 - Do not run two exports into the same output directory concurrently. An export is not a point-in-time snapshot if conversations change during pagination. Deleted/temporary chats and inaccessible workspace data cannot be recovered.
 
 The default export folders, local credentials, HAR files, virtual environment, and index caches are ignored by Git. If you choose a custom output path, place it under an ignored directory or add an ignore rule before committing anything.

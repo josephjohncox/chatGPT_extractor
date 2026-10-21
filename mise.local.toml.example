@@ -33,6 +33,9 @@ CHATGPT_PROJECTS = '[]'
 CHATGPT_AUTO_PROJECTS = "true"
 CHATGPT_INCLUDE_ARCHIVED = "false"
 CHATGPT_EXPORT_FORMAT = "json"
+# Default web snapshot includes available memories, custom instructions, and account/settings data.
+# Set false or pass --no-auxiliary for conversations only; --auxiliary forces inclusion.
+CHATGPT_AUXILIARY = "true"
 # Output for export/import; also the default directory for the offline index.
 # Absolute paths and ~ are supported; relative paths are repository-relative under mise.
 CHATGPT_OUTPUT_DIR = "chatgpt_export"

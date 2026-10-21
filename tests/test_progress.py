@@ -194,7 +194,7 @@ def test_auxiliary_progress_distinguishes_unavailable_failed_and_not_attempted(t
                 return {"items": ["PRIVATE_MEMORY_CONTENT"]}
             if path == "user_system_messages":
                 raise HTTPError(404, path)
-            raise HTTPError(403, path)
+            raise HTTPError(401, path)
 
     with pytest.raises(HTTPError):
         export_auxiliary_data(Client(Config()), "PRIVATE_TOKEN", tmp_path, progress=progress)
@@ -288,7 +288,7 @@ def test_full_cli_export_reports_discovery_auxiliary_and_index_without_private_t
 
     monkeypatch.setattr("chatgpt_exporter.ChatGPTClient", Client)
     monkeypatch.setenv("CHATGPT_ACCESS_TOKEN", "PRIVATE_ACCESS_TOKEN")
-    assert main(["export", "--auxiliary", "--output", str(tmp_path)]) == 0
+    assert main(["export", "--output", str(tmp_path)]) == 0
     captured = capsys.readouterr()
     logs = captured.err
     for phase in (

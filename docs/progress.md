@@ -3,7 +3,7 @@
 ## Use the default display
 
 ```sh
-mise run export -- --auxiliary
+mise run export
 mise run import -- /path/to/export.zip
 mise run index -- /path/to/previous/export
 mise run probe
@@ -45,7 +45,7 @@ mise run probe > probe-result.json 2> probe-progress.log
 mise run probe > probe-result.json
 
 # Suppress progress, but keep final results and errors:
-mise run export -- --auxiliary --no-progress
+mise run export -- --no-progress
 ```
 
 Alternatively, set `CHATGPT_PROGRESS = "false"` under the existing `[env]` in private `mise.local.toml`. The browser helper's downloaded TOML documents this setting without changing existing preferences. On failure before a probe result is available, stdout may be empty; check the exit status and stderr rather than treating an empty file as JSON.
@@ -54,7 +54,7 @@ Non-terminal stderr uses timestamped lines with stage starts, bounded periodic u
 
 ## Auxiliary snapshots are not a full-backup guarantee
 
-Use `--auxiliary` to enable memories/settings snapshots. Without it, the CLI explicitly reports that the auxiliary stage is disabled.
+Memories, custom instructions, and account/settings snapshots are part of the default web export. Use `--no-auxiliary` or `CHATGPT_AUXILIARY = "false"` to request conversations only. The existing `--auxiliary` flag remains supported and explicitly enables snapshots even if configuration disables them. CLI flags override the config value. The CLI reports when this stage is explicitly disabled; `probe`, offline `import`, and `index` never fetch auxiliary data.
 
 The auxiliary bar counts endpoint attempts, not individual memories, attachments, or a verified account-wide backup. `8/8` means eight configured endpoints were attempted. It does not mean every endpoint was available or every memory was retrieved.
 
@@ -63,14 +63,14 @@ The auxiliary bar counts endpoint attempts, not individual memories, attachments
 - `not_attempted`: the run did not reach this endpoint.
 - `in_progress`: the last checkpoint was written just before the request; an ungracefully killed process may leave this state.
 - `saved`: a successful snapshot was written.
-- `unavailable`: the endpoint returned 404/405.
+- `unavailable`: the optional endpoint returned plain 403/404/405 and is not accessible with the current account/permissions; an explicit browser challenge is not classified this way.
 - `failed`: a request/response or local write failed.
 - `interrupted`: a graceful interruption stopped the active snapshot.
 
-If a new attempt fails, an earlier valid snapshot is retained; its presence alone is not evidence that the current attempt succeeded. Authentication/access failures abort the run. Other optional endpoint failures are reported as warnings and can coexist with exit status 0, so inspect the availability file even when the command finishes.
+If a new attempt fails, an earlier valid snapshot is retained; its presence alone is not evidence that the current attempt succeeded. A 401 or explicit browser challenge aborts the auxiliary stage and run. Plain 403 on an optional snapshot is recorded as unavailable and the next endpoint is checked; it is not assumed to be a global authentication failure. Other optional endpoint failures are reported as warnings and can coexist with exit status 0, so inspect the availability file even when the command finishes.
 
 ## Stop and resume
 
 Press **Ctrl+C** to stop. The CLI cleans up the live display, reports interruption, and exits **130**. Conversation files and their incremental checkpoints already saved remain available. On rerun, matching ID/format/update-time/checksum entries are skipped unless `--refresh` is supplied. Do not run concurrent writers into the same directory.
 
-Auxiliary status distinguishes endpoints that failed or were interrupted from ones never attempted. Checkpointing requires a writable filesystem; abrupt process termination or filesystem failure cannot guarantee a final status update. Auxiliary snapshots are retried on a later export with `--auxiliary` rather than treated as conversation checkpoints.
+Auxiliary status distinguishes endpoints that failed or were interrupted from ones never attempted. Checkpointing requires a writable filesystem; abrupt process termination or filesystem failure cannot guarantee a final status update. Auxiliary snapshots are refreshed on each later web export unless explicitly disabled; they are not treated as conversation checkpoints.

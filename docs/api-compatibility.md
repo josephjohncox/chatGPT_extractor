@@ -21,8 +21,8 @@ These endpoints are **undocumented** and may change by account, workspace, or ro
 | Project discovery | `/backend-api/gizmos/snorlax/sidebar` | Cursor pagination; nested `gizmo.gizmo` / `gizmo` shapes; `g-p-` IDs only |
 | Project conversations | `/backend-api/gizmos/{id}/conversations` | Initial cursor `0`, then returned cursors |
 | Conversation detail | `/backend-api/conversation/{id}` | Raw mapping retained; Markdown uses selected-node ancestry |
-| User settings | `/backend-api/settings/user` | Optional snapshot; replaces the original guessed `/settings` path |
-| Other auxiliary data | memories, user system messages, model/account metadata, beta features, Codex usage, compliance | Optional availability checks only; not assumed supported |
+| User settings | `/backend-api/settings/user` | Default web-export snapshot (can be disabled); replaces the original guessed `/settings` path |
+| Other auxiliary data | memories, user system messages, model/account metadata, beta features, Codex usage, compliance | Attempted by default in web exports; availability recorded per endpoint, not assumed supported or complete |
 
 Community evidence for project listing shapes and pagination:
 
@@ -61,7 +61,7 @@ After the correction, normal `mise run probe` returned 200 for conversations, pr
 
 ## Remaining live gate
 
-Run `scripts/probe-chatgpt.js` in DevTools on the user's normal signed-in `https://chatgpt.com` tab. Its console report contains only statuses and response shapes. Supply the active workspace account ID if needed. After the checks, an explicit confirmation can download `mise.local.toml` containing the browser's bearer token, the supplied workspace ID, the browser's `navigator.userAgent` as `CHATGPT_USER_AGENT`, a prompted export output directory, and an explicit `CHATGPT_BUILD_INDEX` setting with usage comments; this credential file is separate from the redacted report and must stay private. Merge its five active keys into an existing local file, preserving other settings and any intentional index-generation preference, then set permissions to 0600. Compare the project nesting/pagination fields with the adapter and add sanitized fixtures for any new shapes. Do not share tokens, cookies, session JSON, raw HAR files, or conversation bodies.
+Run `scripts/probe-chatgpt.js` in DevTools on the user's normal signed-in `https://chatgpt.com` tab. Its console report contains only statuses and response shapes. Supply the active workspace account ID if needed. After the checks, an explicit confirmation can download `mise.local.toml` containing the browser's bearer token, the supplied workspace ID, the browser's `navigator.userAgent` as `CHATGPT_USER_AGENT`, a prompted export output directory, and explicit `CHATGPT_BUILD_INDEX` / `CHATGPT_AUXILIARY` settings with usage comments; this credential file is separate from the redacted report and must stay private. Merge its six active keys into an existing local file, preserving other settings and intentional index-generation or auxiliary-snapshot preferences, then set permissions to 0600. Compare the project nesting/pagination fields with the adapter and add sanitized fixtures for any new shapes. Do not share tokens, cookies, session JSON, raw HAR files, or conversation bodies.
 
 Keep the configured User-Agent aligned with the signed-in browser, rerun `mise run probe`, then perform a deliberately scoped export to a separate ignored output directory before a full account export. If challenges persist, compare one request variable at a time; a separate browser-context adapter is not implemented and should not be assumed necessary from a challenge response alone. Refreshing tokens without isolating the request difference is not proof of a fix.
 

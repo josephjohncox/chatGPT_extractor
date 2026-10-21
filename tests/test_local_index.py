@@ -291,7 +291,7 @@ def test_export_builds_index_in_overridden_output_directory(tmp_path, monkeypatc
     monkeypatch.setattr("chatgpt_exporter.ChatGPTClient", Client)
     monkeypatch.setenv("CHATGPT_OUTPUT_DIR", str(tmp_path / "default"))
     chosen = tmp_path / "chosen"
-    assert main(["export", "--output", str(chosen)]) == 0
+    assert main(["export", "--no-auxiliary", "--output", str(chosen)]) == 0
     assert (chosen / "index.html").is_file()
     assert not (tmp_path / "default").exists()
 

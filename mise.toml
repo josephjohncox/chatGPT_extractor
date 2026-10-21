@@ -18,7 +18,7 @@ description = "Synchronize locked Python dependencies (uv owns .venv)"
 run = "uv sync --locked"
 
 [tasks.export]
-description = "Export ChatGPT conversations using private local credentials"
+description = "Snapshot conversations, available memories/instructions/settings, and local HTML using private credentials"
 run = "uv run --locked -- python chatgpt_exporter.py export"
 
 [tasks.probe]

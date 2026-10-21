@@ -92,7 +92,11 @@ def export_auxiliary_data(
                         f"Auxiliary {endpoint}: saved {human_bytes(target.stat().st_size)}"
                     )
                 except HTTPError as exc:
-                    outcome = "unavailable" if exc.status in {404, 405} else "failed"
+                    outcome = (
+                        "unavailable"
+                        if exc.status in {403, 404, 405} and not exc.browser_challenge
+                        else "failed"
+                    )
                     statuses[filename] = {
                         "status": exc.status,
                         "available": False,
@@ -102,7 +106,7 @@ def export_auxiliary_data(
                     report.warning(
                         f"Auxiliary {endpoint}: {outcome} (HTTP {exc.status}); earlier snapshot retained"
                     )
-                    if exc.status in {401, 403}:
+                    if exc.status == 401 or exc.browser_challenge:
                         fatal = exc
                 except ExportError as exc:
                     statuses[filename] = {
@@ -348,6 +352,7 @@ def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
         config,
         output_format=args.format or config.output_format,
         output_dir=output_directory(str(args.output or config.output_dir)),
+        auxiliary=config.auxiliary if args.auxiliary is None else args.auxiliary,
     )
     if args.command != "probe":
         report.notice(
@@ -375,7 +380,7 @@ def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
             report.result(json.dumps(result_report, indent=2))
             return int(any("error" in endpoint for endpoint in result_report["endpoints"].values()))
         report.notice(
-            f"Export scope: auto_projects={config.auto_projects}; archived={config.include_archived}; auxiliary={args.auxiliary}; request_delay={config.request_delay:.1f}s; timeout={config.timeout:.1f}s"
+            f"Export scope: auto_projects={config.auto_projects}; archived={config.include_archived}; auxiliary={config.auxiliary}; request_delay={config.request_delay:.1f}s; timeout={config.timeout:.1f}s"
         )
         token = client.access_token()
         conversations = client.all_conversations(token)
@@ -389,11 +394,11 @@ def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
             refresh=args.refresh,
             progress=report,
         )
-        if args.auxiliary:
+        if config.auxiliary:
             export_auxiliary_data(client, token, config.output_dir, progress=report)
         else:
             report.notice(
-                "Auxiliary snapshots disabled; pass --auxiliary to include memories/settings checks"
+                "Auxiliary snapshots explicitly disabled; pass --auxiliary or set CHATGPT_AUXILIARY=true to include memories/settings checks"
             )
     if config.build_index and not args.no_index:
         result = max(result, generate_local_index(config.output_dir, progress=report))
@@ -435,7 +440,10 @@ def main(argv: list[str] | None = None) -> int:
         "--refresh", action="store_true", help="Refetch even if metadata is unchanged"
     )
     parser.add_argument(
-        "--auxiliary", action="store_true", help="Also snapshot memories/settings (web export only)"
+        "--auxiliary",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Snapshot memories/settings with web exports (enabled by default; --no-auxiliary disables it; overrides CHATGPT_AUXILIARY)",
     )
     args = parser.parse_args(argv)
     if args.command == "import" and args.archive is None:
