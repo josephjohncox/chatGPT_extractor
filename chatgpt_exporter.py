@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from attachments import AttachmentManager
-from chatgpt_client import ChatGPTClient, ExportError, HTTPError
+from chatgpt_client import ChatGPTClient, ExportError, HTTPError, RetryStopped
 from conversation_format import (
     conversation_to_markdown,
 )
@@ -73,7 +73,7 @@ def export_auxiliary_data(
     try:
         with report.stage("Auxiliary snapshots", total=len(endpoints)) as work:
             for i, (filename, (endpoint, params)) in enumerate(endpoints.items(), 1):
-                fatal = None
+                fatal: ExportError | None = None
                 statuses[filename] = {
                     "available": False,
                     "attempted": True,
@@ -109,7 +109,7 @@ def export_auxiliary_data(
                     report.warning(
                         f"Auxiliary {endpoint}: {outcome} (HTTP {exc.status}); earlier snapshot retained"
                     )
-                    if exc.status == 401 or exc.browser_challenge:
+                    if isinstance(exc, RetryStopped) or exc.status == 401 or exc.browser_challenge:
                         fatal = exc
                 except ExportError as exc:
                     statuses[filename] = {
@@ -268,6 +268,10 @@ def export_conversations(
                         else conversation_to_markdown({**detail, **meta}, extract_messages(detail))
                     )
                     write_text_file(path, text)
+                except RetryStopped:
+                    failed += 1
+                    work.advance(detail="retry policy stopped the run; " + summary(), force=True)
+                    raise
                 except HTTPError as exc:
                     if exc.status in {401, 403}:
                         failed += 1
@@ -577,6 +581,13 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 130
+    except RetryStopped as exc:
+        if report is not None:
+            report.notice(
+                f"Run deferred after {time.monotonic() - started:.1f}s; completed files/checkpoints retained; exit status 75"
+            )
+        print(f"Deferred: {exc}", file=sys.stderr)
+        return 75
     except (ConfigError, ExportError) as exc:
         if report is not None:
             report.notice(f"Run stopped after {time.monotonic() - started:.1f}s")

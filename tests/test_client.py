@@ -188,7 +188,7 @@ def test_retry_transient_and_rate_limit(monkeypatch):
     instance = ChatGPTClient(replace(Config(), request_delay=0, max_retries=2), transport)
     assert instance.json("conversations", "token", label="test") == {"items": []}
     assert len(transport.calls) == 3
-    assert 2 in sleeps and 8 in sleeps
+    assert sleeps == [2.0, 2.0]
 
 
 def test_network_error_details_are_withheld(monkeypatch):
@@ -202,9 +202,9 @@ def test_network_error_details_are_withheld(monkeypatch):
 def test_retry_after_date_and_bounds():
     future = format_datetime(datetime.now(UTC) + timedelta(seconds=30))
     assert 25 <= retry_delay(future, 0) <= 31
-    assert retry_delay("9999999", 0) == 120
+    assert retry_delay("9999999", 0) == 9999999  # budgets must defer, not retry before this header
     assert retry_delay("-3", 0) == 1
-    assert retry_delay("garbage", 2) == 16
+    assert retry_delay("garbage", 2) == 4
 
 
 def test_credentials_never_sent_off_origin():

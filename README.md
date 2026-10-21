@@ -143,8 +143,10 @@ All of these can go under `[env]` in `mise.local.toml`:
 | `CHATGPT_EXPORT_FORMAT` | `json` | `json` or `markdown` |
 | `CHATGPT_PAGE_SIZE` | `100` | Regular listing page size, 1–100 |
 | `CHATGPT_REQUEST_DELAY` | `1` | Minimum seconds between requests |
-| `CHATGPT_TIMEOUT` | `30` | Per-request timeout in seconds |
-| `CHATGPT_MAX_RETRIES` | `5` | Retries for network failures, 429, and selected 5xx responses; 0–10 |
+| `CHATGPT_TIMEOUT` | `30` | Connect/read timeout in seconds; not a whole-run deadline |
+| `CHATGPT_MAX_RETRIES` | `2` | Per-request retries (at most 3 attempts by default); 0–10 |
+| `CHATGPT_MAX_RETRY_WAIT` | `10` | Maximum single autonomous retry sleep; a longer server cooldown defers the run |
+| `CHATGPT_MAX_TOTAL_RETRY_WAIT` | `30` | Shared retry-sleep allowance across the command, not reset by each conversation/file |
 
 Example explicit projects:
 
@@ -188,6 +190,14 @@ mise run export -- --refresh
 This also refreshes enabled attachments, so normal incremental export is preferable for routine updates. `mise run index` only rebuilds the webpage from local files; it does not fetch new messages. Mixed JSON/Markdown views prefer the newer saved version; exact Markdown timestamps/IDs from a checkpoint are used only after its file checksum matches.
 
 There is no atomic whole-account snapshot while chats are changing. A conversation continued after its detail was fetched needs another run. Export after a conversation finishes, and rerun if you used it during the export. Forced refresh removes reliance on unchanged listing timestamps, but still captures each conversation only as of its own request.
+
+## Bounded retries and rate limiting
+
+The default retries use short local delays (1s, 2s) when there is no valid server `Retry-After`. A valid server cooldown is honored **or the run is deferred**, never shortened and retried early. More than 10s for one pause, more than 30s of cumulative retry sleep, or exhausted 429/network retries stops the command with **exit 75** and retains completed checkpoints. This avoids minute-long pauses restarting for each of hundreds of conversations.
+
+Responses are closed before waiting. Actual transport failures clear connection pools while retaining session cookies; HTTP 429 alone is not treated as proof of a broken connection. Logs include the operation, logical request number, retry attempt, wait source, cumulative budget, and recovery so forward progress is visible.
+
+See [retry policy and resume instructions](docs/retries.md). Increase steady pacing or explicitly raise both wait budgets for an unattended slow run if needed; these controls cannot remove a provider quota. Existing numeric overrides in `mise.local.toml` still win over changed defaults. Stop any already-running old process with Ctrl+C; a code update cannot change its in-memory retry policy.
 
 ## Progress and run status
 

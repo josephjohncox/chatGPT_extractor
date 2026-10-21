@@ -55,7 +55,7 @@ run = "uv run --locked -- ruff format --check ."
 
 [tasks.typecheck]
 description = "Check application types"
-run = "uv run --locked -- mypy chatgpt_exporter.py chatgpt_client.py export_config.py conversation_format.py export_io.py local_index.py progress_report.py attachment_refs.py attachment_transport.py attachments.py attachment_view.py canvas_artifacts.py"
+run = "uv run --locked -- mypy chatgpt_exporter.py chatgpt_client.py export_config.py conversation_format.py export_io.py local_index.py progress_report.py attachment_refs.py attachment_transport.py attachments.py attachment_view.py canvas_artifacts.py retry_control.py"
 
 [tasks.check]
 description = "Run offline quality gates"

@@ -1,8 +1,6 @@
 """Read-only ChatGPT web transport. These endpoints are not a supported public API."""
 
 import time
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -10,6 +8,8 @@ import requests
 
 from export_config import Config, normalize_project_id
 from progress_report import NO_PROGRESS, ProgressReporter, human_bytes
+from retry_control import RetryBudget, server_retry_after
+from retry_control import retry_delay as retry_delay
 
 BASE_URL = "https://chatgpt.com/backend-api"
 
@@ -47,16 +47,38 @@ class HTTPError(ExportError):
         super().__init__(f"{label}: HTTP {status}.{hint}")
 
 
-def retry_delay(value: str | None, attempt: int) -> float:
-    try:
-        delay = float(value) if value else 4 * 2**attempt
-    except ValueError:
-        try:
-            when = parsedate_to_datetime(value or "")
-            delay = (when - datetime.now(UTC)).total_seconds()
-        except (TypeError, ValueError, OverflowError):
-            delay = 4 * 2**attempt
-    return min(120.0, max(1.0, delay))
+class RetryStopped(HTTPError):
+    """Stop the whole run rather than resetting the cooldown budget for the next item."""
+
+    temporary_stop = True
+
+    def __init__(
+        self,
+        status: int,
+        label: str,
+        *,
+        request_id: int,
+        reason: str,
+        retry_after: float | None,
+        spent: float,
+        max_wait: float = 10,
+        max_total_wait: float = 30,
+    ):
+        super().__init__(status, label)
+        self.reason = reason
+        self.operation = label
+        self.request_id = request_id
+        self.retry_after = retry_after
+        self.spent = spent
+        cause = f"HTTP {status}" if status else "network request failed"
+        cooldown = (
+            f" Server requests a {retry_after:.1f}s cooldown; wait at least that long before resuming."
+            if retry_after is not None
+            else " Retry later; no trusted server cooldown was provided."
+        )
+        self.args = (
+            f"{label} [request #{request_id}]: {cause}; retry stopped ({reason}); single-wait limit {max_wait:.1f}s, cumulative retry sleep {spent:.1f}/{max_total_wait:.1f}s. Saved checkpoints are retained; no further items will be requested.{cooldown} Adjust CHATGPT_MAX_RETRY_WAIT / CHATGPT_MAX_TOTAL_RETRY_WAIT only if longer autonomous waits are intentional.",
+        )
 
 
 class ChatGPTClient:
@@ -72,6 +94,9 @@ class ChatGPTClient:
         self.progress = progress if progress is not None else NO_PROGRESS
         self._last_request: float | None = None
         self.project_files: dict[str, list[dict]] = {}
+        self.retry_budget = RetryBudget(config.max_retry_wait, config.max_total_retry_wait)
+        self._request_serial = 0
+        self.retry_stopped: RetryStopped | None = None
 
     def headers(self, token: str = "") -> dict[str, str]:
         headers = {
@@ -93,21 +118,96 @@ class ChatGPTClient:
                 time.sleep(seconds)
                 work.advance()
 
+    def ensure_can_request(self) -> None:
+        if self.retry_stopped is not None:
+            raise self.retry_stopped.with_traceback(None) from None
+
+    def next_request_id(self) -> int:
+        self.ensure_can_request()
+        self._request_serial += 1
+        return self._request_serial
+
+    def reset_connections(self) -> None:
+        # Close pools, not the session: account cookies and configured headers must survive.
+        reset = 0
+        for adapter in getattr(self.session, "adapters", {}).values():
+            try:
+                adapter.close()
+                reset += 1
+            except Exception:
+                self.progress.warning(
+                    "A failed transport pool could not be cleared; details withheld"
+                )
+        self.progress.notice(
+            f"Network cleanup: cleared {reset} connection pools; session cookies retained"
+        )
+
+    def stop_retry(
+        self, *, status: int, label: str, request_id: int, reason: str, retry_after: float | None
+    ) -> None:
+        self.progress.notice(
+            f"Retry stopped: {label} [request #{request_id}]; reason={reason}; run retry sleep={self.retry_budget.spent:.1f}/{self.config.max_total_retry_wait:.1f}s"
+        )
+        self.retry_stopped = RetryStopped(
+            status,
+            label,
+            request_id=request_id,
+            reason=reason,
+            retry_after=retry_after,
+            spent=self.retry_budget.spent,
+            max_wait=self.config.max_retry_wait,
+            max_total_wait=self.config.max_total_retry_wait,
+        )
+        raise self.retry_stopped from None
+
+    def wait_for_retry(
+        self, *, status: int, label: str, request_id: int, attempt: int, header: str | None
+    ) -> None:
+        requested = server_retry_after(header)
+        if attempt >= self.config.max_retries:
+            self.stop_retry(
+                status=status,
+                label=label,
+                request_id=request_id,
+                reason="attempts_exhausted",
+                retry_after=requested,
+            )
+        delay = retry_delay(header, attempt)
+        rejected = self.retry_budget.rejection(delay)
+        if rejected:
+            self.stop_retry(
+                status=status,
+                label=label,
+                request_id=request_id,
+                reason=rejected,
+                retry_after=requested,
+            )
+        self.retry_budget.reserve(delay)
+        source = "server Retry-After" if requested is not None else "local exponential"
+        cause = f"HTTP {status}" if status else "network failure"
+        self.progress.notice(
+            f"Retry: {label} [request #{request_id}]; {cause}; next attempt {attempt + 2}/{self.config.max_retries + 1}; backoff {delay:.1f}s ({source}); run retry sleep={self.retry_budget.spent:.1f}/{self.config.max_total_retry_wait:.1f}s"
+        )
+        self._wait(delay, f"{label}; bounded retry backoff")
+
     def get(
         self, url: str, *, headers: dict[str, str], params: dict[str, Any] | None = None, label: str
     ) -> requests.Response:
         if not url.startswith("https://chatgpt.com/"):
             raise ExportError("Refusing to send ChatGPT credentials to another origin")
+        request_id = self.next_request_id()
         for attempt in range(self.config.max_retries + 1):
             if self._last_request is not None:
-                delay = max(0, self.config.request_delay - (time.monotonic() - self._last_request))
-                self._wait(delay, "request pacing")
+                self._wait(
+                    max(0, self.config.request_delay - (time.monotonic() - self._last_request)),
+                    "request pacing",
+                )
             try:
                 with self.progress.stage(
                     f"HTTP {label.split(' (', 1)[0]}",
                     total=1,
                     transient=True,
-                    detail=f"attempt {attempt + 1}/{self.config.max_retries + 1}; timeout {self.config.timeout:.1f}s",
+                    detail=f"request #{request_id}; attempt {attempt + 1}/{self.config.max_retries + 1}; connect/read timeout {self.config.timeout:.1f}s",
                 ) as request:
                     self._last_request = time.monotonic()
                     response = self.session.get(
@@ -118,34 +218,38 @@ class ChatGPTClient:
                         allow_redirects=False,
                     )
                     request.advance(
-                        detail=f"HTTP {response.status_code}; {human_bytes(len(response.content))}"
+                        detail=f"request #{request_id}; HTTP {response.status_code}; {human_bytes(len(response.content))}"
                     )
                     request.finish(state="received")
-            except requests.RequestException:
-                if attempt == self.config.max_retries:
-                    self.progress.notice("Network retries exhausted; request details withheld")
-                    raise ExportError(
-                        f"{label}: network request failed after retries (details withheld)"
-                    ) from None
-                delay = retry_delay(None, attempt)
-                self.progress.notice(
-                    f"Retry: network failure; next attempt {attempt + 2}/{self.config.max_retries + 1}; backoff {delay:.1f}s"
+            except requests.RequestException as exc:
+                if exc.response is not None:
+                    exc.response.close()
+                self.reset_connections()
+                self.wait_for_retry(
+                    status=0, label=label, request_id=request_id, attempt=attempt, header=None
                 )
-                self._wait(delay, "network retry backoff")
                 continue
             if response.headers.get("cf-mitigated", "").strip().lower() == "challenge":
                 self.progress.notice("Browser challenge detected; not retrying as rate limiting")
                 return response
-            if (
-                response.status_code not in {429, 500, 502, 503, 504}
-                or attempt == self.config.max_retries
-            ):
-                return response
-            delay = retry_delay(response.headers.get("Retry-After"), attempt)
-            self.progress.notice(
-                f"Retry: HTTP {response.status_code}; next attempt {attempt + 2}/{self.config.max_retries + 1}; backoff {delay:.1f}s"
-            )
-            self._wait(delay, "HTTP retry backoff")
+            if response.status_code in {429, 500, 502, 503, 504}:
+                status = response.status_code
+                header = response.headers.get("Retry-After")
+                if status == 429 or attempt < self.config.max_retries:
+                    response.close()
+                    self.wait_for_retry(
+                        status=status,
+                        label=label,
+                        request_id=request_id,
+                        attempt=attempt,
+                        header=header,
+                    )
+                    continue
+            if attempt and response.status_code == 200:
+                self.progress.notice(
+                    f"Recovered HTTP: {label} [request #{request_id}]; attempt {attempt + 1}/{self.config.max_retries + 1}; HTTP {response.status_code}"
+                )
+            return response
         raise ExportError(f"{label}: no response")
 
     def json(
@@ -154,7 +258,10 @@ class ChatGPTClient:
         response = self.get(
             f"{BASE_URL}/{path}", headers=self.headers(token), params=params, label=label
         )
-        return self.decode(response, label)
+        try:
+            return self.decode(response, label)
+        finally:
+            response.close()
 
     @staticmethod
     def decode(response: requests.Response, label: str) -> dict:
@@ -188,7 +295,10 @@ class ChatGPTClient:
                 headers=headers,
                 label="session authentication",
             )
-            payload = self.decode(response, "session authentication")
+            try:
+                payload = self.decode(response, "session authentication")
+            finally:
+                response.close()
             token = payload.get("accessToken")
             if not isinstance(token, str) or not token:
                 raise ExportError(
@@ -420,6 +530,8 @@ class ChatGPTClient:
                         if isinstance(data.get("items"), list)
                         else None,
                     }
+                except RetryStopped:
+                    raise
                 except HTTPError as exc:
                     report["endpoints"][path] = {
                         "status": exc.status,

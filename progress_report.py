@@ -178,6 +178,8 @@ class ProgressTask:
             state = (
                 "interrupted"
                 if kind is not None and issubclass(kind, KeyboardInterrupt)
+                else "deferred"
+                if getattr(exc, "temporary_stop", False)
                 else "failed"
                 if kind
                 else "done"

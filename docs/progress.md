@@ -11,7 +11,7 @@ mise run probe
 
 No extra flag is required. The CLI uses Rich for live terminal bars, spinners, completed/total counts, elapsed time, and estimated time remaining. Wider terminals also show percentages and item rates. The layout adapts to narrow terminals; current-operation details appear below the bars rather than displacing the counts.
 
-Progress updates while a network request or retry wait is pending. A request row shows its attempt number and configured timeout. Completion shows HTTP status and decoded response size; this is not compressed wire-transfer bandwidth. Conversation export separately counts bytes written to disk.
+Progress updates while a network request or retry wait is pending. A request row shows its operation, logical request number, attempt number, and connect/read timeout. Recovery lines distinguish a successful retry followed by another request from one request repeatedly failing. Completion shows HTTP status and decoded response size; this is not compressed wire-transfer bandwidth. Conversation export separately counts bytes written to disk.
 
 Unknown totals remain indeterminate: a cursor-based listing and a directory scan do not have a trustworthy denominator at the start. The exporter reports page numbers, items received, and unique counts until discovery finishes. After that, conversation export and HTML generation use known totals. ETAs change as processing rates change and are not completion guarantees.
 
@@ -69,6 +69,12 @@ The auxiliary bar counts endpoint attempts, not individual memories, attachments
 - `interrupted`: a graceful interruption stopped the active snapshot.
 
 If a new attempt fails, an earlier valid snapshot is retained; its presence alone is not evidence that the current attempt succeeded. A 401 or explicit browser challenge aborts the auxiliary stage and run. Plain 403 on an optional snapshot is recorded as unavailable and the next endpoint is checked; it is not assumed to be a global authentication failure. Other optional endpoint failures are reported as warnings and can coexist with exit status 0, so inspect the availability file even when the command finishes.
+
+## Bounded retry stops
+
+The default single retry-wait cap is 10 seconds, with 30 seconds of cumulative retry sleep shared across the command. The per-request retry default is 2 (3 attempts). A valid server `Retry-After` is respected or causes a clean deferred stop; it is not shortened to force an early retry. Successful requests do not reset the run-wide budget. A rate-limit/retry stop exits **75**, preserves completed files/checkpoints, and leaves later items unrequested rather than cycling through hundreds of fresh retry budgets. See [retry policy](retries.md).
+
+The budgets limit retry sleep, not the entire runtime. Normal pacing, transfers, and local rendering can take longer. The terminal reports deferred stages explicitly; no live account requests were added to diagnose the reported retry loop.
 
 ## Stop and resume
 

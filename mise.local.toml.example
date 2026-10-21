@@ -59,4 +59,10 @@ CHATGPT_PROGRESS = "true"
 CHATGPT_PAGE_SIZE = "100"
 CHATGPT_REQUEST_DELAY = "1"
 CHATGPT_TIMEOUT = "30"
-CHATGPT_MAX_RETRIES = "5"
+# Per-request retries (2 retries = at most 3 attempts).
+CHATGPT_MAX_RETRIES = "2"
+# Stop/defer instead of sleeping longer than this single cooldown (seconds).
+CHATGPT_MAX_RETRY_WAIT = "10"
+# Shared retry-sleep allowance across the entire command, not reset by each chat/file.
+CHATGPT_MAX_TOTAL_RETRY_WAIT = "30"
+# Valid server Retry-After values are respected or cause a clean deferred exit (75), never shortened.

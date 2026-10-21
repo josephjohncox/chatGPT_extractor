@@ -63,7 +63,9 @@ class Config:
     page_size: int = 100
     request_delay: float = 1.0
     timeout: float = 30.0
-    max_retries: int = 5
+    max_retries: int = 2
+    max_retry_wait: float = 10.0
+    max_total_retry_wait: float = 30.0
     auto_projects: bool = True
     include_archived: bool = False
     build_index: bool = True
@@ -96,7 +98,7 @@ class Config:
                 "CHATGPT_PROJECTS must be a JSON array of [project_id, folder_name] pairs"
             ) from None
         page_size = number(env, "CHATGPT_PAGE_SIZE", 100, 1)
-        retries = number(env, "CHATGPT_MAX_RETRIES", 5, 0)
+        retries = number(env, "CHATGPT_MAX_RETRIES", 2, 0)
         if (
             not page_size.is_integer()
             or page_size > 100
@@ -140,6 +142,8 @@ class Config:
             output_format=output_format,
             page_size=int(page_size),
             max_retries=int(retries),
+            max_retry_wait=number(env, "CHATGPT_MAX_RETRY_WAIT", 10, 0),
+            max_total_retry_wait=number(env, "CHATGPT_MAX_TOTAL_RETRY_WAIT", 30, 0),
             request_delay=number(env, "CHATGPT_REQUEST_DELAY", 1, 0),
             timeout=number(env, "CHATGPT_TIMEOUT", 30, 0.1),
             auto_projects=boolean(env, "CHATGPT_AUTO_PROJECTS", True),

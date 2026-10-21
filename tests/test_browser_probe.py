@@ -125,6 +125,8 @@ def test_download_documents_output_index_projects_and_cookie_alternatives():
         "CHATGPT_MAX_ATTACHMENT_BYTES",
         "mise run attachments",
         "--no-progress",
+        "CHATGPT_MAX_RETRY_WAIT",
+        "CHATGPT_MAX_TOTAL_RETRY_WAIT",
         "CHATGPT_PROJECTS",
         "CHATGPT_SESSION_TOKEN_0",
         "CHATGPT_SESSION_TOKEN_1",

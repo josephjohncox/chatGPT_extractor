@@ -20,7 +20,7 @@ from attachment_transport import (
     save_chunks,
 )
 from canvas_artifacts import canvas_artifacts
-from chatgpt_client import ChatGPTClient, ExportError, HTTPError
+from chatgpt_client import ChatGPTClient, ExportError, HTTPError, RetryStopped
 from conversation_format import sanitize_filename
 from export_io import decode_json, write_json_file, write_text_file
 from progress_report import NO_PROGRESS, ProgressReporter
@@ -330,12 +330,14 @@ class AttachmentManager:
             entry.pop("error", None)
             self.saved += 1
         except HTTPError as exc:
-            fatal = exc.status == 401 or exc.browser_challenge
+            fatal = isinstance(exc, RetryStopped) or exc.status == 401 or exc.browser_challenge
             unavailable = exc.status in {403, 404, 405, 410} and not fatal
             entry.update(
                 outcome="unavailable" if unavailable else "failed",
                 status=exc.status,
-                error="library_session_cookie_required_or_rejected"
+                error="retry_stopped"
+                if isinstance(exc, RetryStopped)
+                else "library_session_cookie_required_or_rejected"
                 if isinstance(exc, LibraryCookieError)
                 else "browser_challenge"
                 if exc.browser_challenge

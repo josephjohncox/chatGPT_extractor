@@ -12,7 +12,7 @@ from urllib.parse import unquote, urljoin, urlsplit
 
 import requests
 
-from chatgpt_client import ChatGPTClient, ExportError, HTTPError, retry_delay
+from chatgpt_client import ChatGPTClient, ExportError, HTTPError
 from progress_report import ProgressReporter, human_bytes
 
 AZURE_HOSTS = {"oaidalleapiprodscus.blob.core.windows.net", "oaiusercontent.blob.core.windows.net"}
@@ -90,9 +90,11 @@ class AttachmentHTTP:
     ) -> DownloadedFile:
         origin = checked_download_url(url)
         report = self.client.progress
+        request_id = self.client.next_request_id()
         for attempt in range(self.client.config.max_retries + 1):
             current = origin
             redirects = 0
+            same_origin = urlsplit(current).hostname == "chatgpt.com"
             try:
                 while True:
                     current = checked_download_url(current)
@@ -127,7 +129,7 @@ class AttachmentHTTP:
                         if same_origin and self.client.config.cookie():
                             headers["Cookie"] = self.client.config.cookie()
                         report.notice(
-                            f"Attachment transfer: attempt {attempt + 1}/{self.client.config.max_retries + 1}; redirect {redirects}/3; timeout {self.client.config.timeout:.1f}s"
+                            f"Attachment transfer [request #{request_id}]: attempt {attempt + 1}/{self.client.config.max_retries + 1}; redirect {redirects}/3; timeout {self.client.config.timeout:.1f}s"
                         )
                         self.client._last_request = time.monotonic()
                         response = session.get(
@@ -152,15 +154,23 @@ class AttachmentHTTP:
                             )
                             redirects += 1
                             continue
-                        if (
-                            response.status_code in {429, 500, 502, 503, 504}
-                            and attempt < self.client.config.max_retries
+                        if response.status_code in {429, 500, 502, 503, 504} and (
+                            response.status_code == 429 or attempt < self.client.config.max_retries
                         ):
-                            delay = retry_delay(response.headers.get("Retry-After"), attempt)
-                            report.notice(
-                                f"Attachment retry: HTTP {response.status_code}; backoff {delay:.1f}s"
+                            status = response.status_code
+                            header = response.headers.get("Retry-After")
+                            # A streaming response must not retain its connection through cooldown.
+                            response.close()
+                            response = None
+                            if not same_origin:
+                                session.close()
+                            self.client.wait_for_retry(
+                                status=status,
+                                label="attachment transfer",
+                                request_id=request_id,
+                                attempt=attempt,
+                                header=header,
                             )
-                            self.client._wait(delay, "attachment retry backoff")
                             break
                         if (
                             response.status_code == 401
@@ -170,20 +180,27 @@ class AttachmentHTTP:
                             raise LibraryCookieError(configured=bool(self.client.config.cookie()))
                         if response.status_code != 200:
                             raise HTTPError(response.status_code, "attachment transfer")
-                        return self._save(response, destination, max_bytes)
+                        result = self._save(response, destination, max_bytes)
+                        if attempt:
+                            report.notice(
+                                f"Recovered HTTP: attachment transfer [request #{request_id}]; attempt {attempt + 1}/{self.client.config.max_retries + 1}; saved {human_bytes(result.size)}"
+                            )
+                        return result
                     finally:
                         if response is not None:
                             response.close()
                         if not same_origin:
                             session.close()
             except requests.RequestException:
-                if attempt == self.client.config.max_retries:
-                    raise ExportError(
-                        "Attachment network transfer failed; details withheld"
-                    ) from None
-                delay = retry_delay(None, attempt)
-                report.notice(f"Attachment retry: network/stream failure; backoff {delay:.1f}s")
-                self.client._wait(delay, "attachment network backoff")
+                if same_origin:
+                    self.client.reset_connections()
+                self.client.wait_for_retry(
+                    status=0,
+                    label="attachment transfer",
+                    request_id=request_id,
+                    attempt=attempt,
+                    header=None,
+                )
         raise ExportError("Attachment transfer exhausted retries")
 
     def _save(self, response: requests.Response, destination: Path, limit: int) -> DownloadedFile:

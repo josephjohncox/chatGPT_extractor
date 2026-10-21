@@ -4,7 +4,7 @@ import pytest
 import requests
 
 from attachment_transport import AttachmentHTTP, LibraryCookieError, checked_download_url
-from chatgpt_client import ChatGPTClient, ExportError, HTTPError
+from chatgpt_client import ChatGPTClient, ExportError, HTTPError, RetryStopped
 from export_config import Config
 
 
@@ -221,6 +221,52 @@ def test_binary_retry_restarts_cleanly_after_stream_failure(tmp_path, monkeypatc
     downloader.download("https://files.oaiusercontent.com/a", target, "fake", max_bytes=32)
     assert target.read_bytes() == b"complete" and len(calls) == 2
     assert not list(tmp_path.glob(".download-*"))
+
+
+def test_stream_retry_response_and_storage_session_are_closed_before_cooldown(
+    tmp_path, monkeypatch
+):
+    response = StreamResponse(status=429, headers={"Retry-After": "1"})
+    calls = []
+    responses = [response, StreamResponse([b"complete"])]
+    storage = []
+
+    class Storage(Session):
+        def close(self):
+            self.closed = True
+            super().close()
+
+    def factory():
+        session = Storage(responses, calls)
+        session.closed = False
+        storage.append(session)
+        return session
+
+    client = ChatGPTClient(Config(request_delay=0), Session([], calls))
+    downloader = AttachmentHTTP(client, session_factory=factory)
+
+    def check_closed(_):
+        assert response.closed and storage[0].closed
+
+    monkeypatch.setattr("chatgpt_client.time.sleep", check_closed)
+    downloader.download(
+        "https://files.oaiusercontent.com/a", tmp_path / "file", "fake", max_bytes=32
+    )
+    assert (tmp_path / "file").read_bytes() == b"complete"
+
+
+def test_json_and_binary_requests_share_the_same_retry_budget(tmp_path, monkeypatch):
+    downloader, calls = transport(
+        [StreamResponse(status=429, headers={"Retry-After": "2"})], monkeypatch
+    )
+    downloader.client.config = Config(request_delay=0, max_retries=1)
+    downloader.client.retry_budget.reserve(29)
+    with pytest.raises(RetryStopped) as exc:
+        downloader.download(
+            "https://files.oaiusercontent.com/a", tmp_path / "file", "fake", max_bytes=32
+        )
+    assert exc.value.reason == "run_wait_budget"
+    assert len(calls) == 1 and not (tmp_path / "file").exists()
 
 
 def test_redirect_loops_are_bounded(tmp_path, monkeypatch):
