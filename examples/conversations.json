@@ -1,0 +1,31 @@
+[
+  {
+    "id": "demo-conversation",
+    "title": "Synthetic offline example",
+    "create_time": 0,
+    "update_time": 1,
+    "current_node": "answer",
+    "mapping": {
+      "question": {
+        "parent": null,
+        "children": ["answer"],
+        "message": {
+          "author": {"role": "user"},
+          "create_time": 0,
+          "content": {"content_type": "text", "parts": ["How does this offline example work?"]},
+          "metadata": {}
+        }
+      },
+      "answer": {
+        "parent": "question",
+        "children": [],
+        "message": {
+          "author": {"role": "assistant"},
+          "create_time": 1,
+          "content": {"content_type": "text", "parts": ["This is synthetic data shipped with the project. Import it to build a local HTML archive without signing in or making ChatGPT requests."]},
+          "metadata": {}
+        }
+      }
+    }
+  }
+]

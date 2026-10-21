@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: "2026.10.10"
@@ -23,5 +24,7 @@ jobs:
           cache: false
       - name: Verify dependency lock
         run: uv lock --check
+      - name: Scan Git history for secrets
+        run: mise run secrets
       - name: Run offline gates (no ChatGPT credentials)
         run: mise run check

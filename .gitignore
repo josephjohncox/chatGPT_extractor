@@ -10,6 +10,16 @@ exports/
 .chatgpt-index/
 .chatgpt-assets/
 *.har
+*.zip
+*.log
+*_restored/
+.restore-*/
+.backup-*
+conversations.json
+!examples/conversations.json
+probe-result.json
+.export-index.json
+auxiliary-status.json
 
 # Local tools and caches
 .venv/

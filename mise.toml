@@ -9,6 +9,7 @@ lockfile = true
 [tools]
 python = "3.13.9"
 uv = "0.12.22"
+"aqua:gitleaks/gitleaks" = "8.30.1"
 
 [env]
 PYTHONUTF8 = "1"
@@ -37,6 +38,18 @@ run = "uv run --locked -- python chatgpt_exporter.py attachments"
 description = "Build an offline HTML chat/project index from existing exports (no credentials or network)"
 run = "uv run --locked -- python chatgpt_exporter.py index"
 
+[tasks.zip]
+description = "Back up the output directory as a private ZIP; keep the original directory"
+run = "uv run --locked -- python chatgpt_exporter.py zip"
+
+[tasks.unzip]
+description = "Restore a backup into a new directory; keep the ZIP and existing output"
+run = "uv run --locked -- python chatgpt_exporter.py unzip"
+
+[tasks.secrets]
+description = "Scan all fetched Git history for secrets with redacted output"
+run = "gitleaks git . --log-opts=--all --redact=100 --no-banner"
+
 [tasks.test]
 description = "Run offline tests (no account or network required)"
 run = "uv run --locked -- pytest"
@@ -55,7 +68,7 @@ run = "uv run --locked -- ruff format --check ."
 
 [tasks.typecheck]
 description = "Check application types"
-run = "uv run --locked -- mypy chatgpt_exporter.py chatgpt_client.py export_config.py conversation_format.py export_io.py local_index.py progress_report.py attachment_refs.py attachment_transport.py attachments.py attachment_view.py canvas_artifacts.py retry_control.py"
+run = "uv run --locked -- mypy chatgpt_exporter.py chatgpt_client.py export_config.py conversation_format.py export_io.py local_index.py progress_report.py attachment_refs.py attachment_transport.py attachments.py attachment_view.py canvas_artifacts.py retry_control.py archive_backup.py"
 
 [tasks.check]
 description = "Run offline quality gates"

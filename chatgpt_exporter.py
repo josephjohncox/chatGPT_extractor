@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from archive_backup import pack_directory, unpack_directory
 from attachments import AttachmentManager
 from chatgpt_client import ChatGPTClient, ExportError, HTTPError, RetryStopped
 from conversation_format import (
@@ -367,6 +368,27 @@ def generate_local_index(directory: Path, *, progress: ProgressReporter | None =
 def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
     from dataclasses import replace
 
+    if args.command in {"zip", "unzip"}:
+        default = output_directory(os.environ.get("CHATGPT_OUTPUT_DIR", "chatgpt_export"))
+        if args.command == "zip":
+            source = (args.archive or default).expanduser().absolute()
+            target = args.output or source.with_name(source.name + ".zip")
+            count = pack_directory(source, target, overwrite=args.overwrite, progress=report)
+            report.result(
+                f"ZIP backup: {count} entries; {target.expanduser().absolute()}; source directory retained"
+            )
+        else:
+            source = (
+                (args.archive or default.with_name(default.name + ".zip")).expanduser().absolute()
+            )
+            target = args.output or source.with_name(source.stem + "_restored")
+            count = unpack_directory(
+                source, target, max_bytes=args.max_unpacked_gib * 1024**3, progress=report
+            )
+            report.result(
+                f"ZIP restored: {count} entries; {target.expanduser().absolute()}; input ZIP retained"
+            )
+        return 0
     if args.command == "index":
         report.notice("Index mode: existing local files only; no authentication or API calls")
         directory = (
@@ -375,7 +397,19 @@ def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
             or output_directory(os.environ.get("CHATGPT_OUTPUT_DIR", "chatgpt_export"))
         )
         return generate_local_index(directory, progress=report)
-    config = Config.from_env()
+    environment = dict(os.environ)
+    if args.command == "import":
+        # Offline import must not depend on valid or expired live credentials.
+        auth_keys = {
+            "CHATGPT_ACCESS_TOKEN",
+            "CHATGPT_SESSION_TOKEN",
+            "CHATGPT_SESSION_TOKEN_0",
+            "CHATGPT_SESSION_TOKEN_1",
+            "CHATGPT_WORKSPACE_ID",
+            "CHATGPT_USER_AGENT",
+        }
+        environment = {key: value for key, value in os.environ.items() if key not in auth_keys}
+    config = Config.from_env(environment)
     config = replace(
         config,
         output_format=args.format or config.output_format,
@@ -500,14 +534,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["export", "probe", "import", "index", "attachments"],
+        choices=["export", "probe", "import", "index", "attachments", "zip", "unzip"],
         default="export",
     )
     parser.add_argument(
         "archive",
         nargs="?",
         type=Path,
-        help="Archive file (import) or existing export directory (index/attachments)",
+        help="Source ZIP/JSON or directory; zip/unzip default to CHATGPT_OUTPUT_DIR and its sibling ZIP",
     )
     parser.add_argument("--format", choices=["json", "markdown"])
     parser.add_argument(
@@ -524,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        help="Export output directory; for index, an alternative to the directory argument",
+        help="Output directory (or ZIP filename for zip); unzip requires a new destination",
     )
     parser.add_argument(
         "--no-index",
@@ -540,11 +574,29 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Snapshot memories/settings with web exports (enabled by default; --no-auxiliary disables it; overrides CHATGPT_AUXILIARY)",
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="zip only: atomically replace an existing backup; source directory is kept",
+    )
+    parser.add_argument(
+        "--max-unpacked-gib",
+        type=int,
+        default=64,
+        help="unzip size limit in GiB (default: 64; max 100,000 entries)",
+    )
     args = parser.parse_args(argv)
+    if args.overwrite and args.command != "zip":
+        parser.error("--overwrite is supported only by zip; restore never merges or overwrites")
+    if args.max_unpacked_gib <= 0:
+        parser.error("--max-unpacked-gib must be positive")
     if args.command == "import" and args.archive is None:
         parser.error("import requires an archive path")
-    if args.command not in {"import", "index", "attachments"} and args.archive is not None:
-        parser.error("a source path is valid only for import, index, or attachments")
+    if (
+        args.command not in {"import", "index", "attachments", "zip", "unzip"}
+        and args.archive is not None
+    ):
+        parser.error("a source path is valid only for import, index, attachments, zip, or unzip")
     if (
         args.command in {"index", "attachments"}
         and args.archive is not None

@@ -26,7 +26,7 @@ pythonpath = ["."]
 [tool.ruff]
 target-version = "py313"
 line-length = 100
-exclude = ["chatgpt_export", "chatgpt_export_hadrian"]
+exclude = ["chatgpt_export*", "exports", ".local", ".chatgpt-assets", ".chatgpt-index"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "UP"]
