@@ -1,0 +1,22 @@
+# Copy to mise.local.toml, then chmod 600 mise.local.toml.
+# mise loads mise.local.toml automatically; it is ignored by Git.
+# Use ONLY one authentication method. Values are cookie contents, not headers.
+[env]
+# Method A: Bearer accessToken from https://chatgpt.com/api/auth/session
+CHATGPT_ACCESS_TOKEN = ""
+# Method B: one __Secure-next-auth.session-token cookie
+CHATGPT_SESSION_TOKEN = ""
+# Method C: split .0 / .1 cookies (or put a single cookie in _0)
+CHATGPT_SESSION_TOKEN_0 = ""
+CHATGPT_SESSION_TOKEN_1 = ""
+# Account header from a backend-api request; blank for personal/default account.
+CHATGPT_WORKSPACE_ID = ""
+# Optional overrides/additions, not required with automatic project discovery.
+CHATGPT_PROJECTS = '[]'
+# Example: [["g-p-0123456789abcdef0123456789abcdef", "Research"]]
+CHATGPT_AUTO_PROJECTS = "true"
+CHATGPT_INCLUDE_ARCHIVED = "false"
+CHATGPT_EXPORT_FORMAT = "json"
+CHATGPT_OUTPUT_DIR = "chatgpt_export"
+CHATGPT_REQUEST_DELAY = "1"
+CHATGPT_TIMEOUT = "30"

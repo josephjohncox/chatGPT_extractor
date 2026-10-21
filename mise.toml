@@ -1,0 +1,54 @@
+min_version = "2026.9.11"
+
+[tool_config]
+locked = true
+
+[settings]
+lockfile = true
+
+[tools]
+python = "3.13.9"
+uv = "0.12.22"
+
+[env]
+PYTHONUTF8 = "1"
+
+[tasks.deps]
+description = "Synchronize locked Python dependencies (uv owns .venv)"
+run = "uv sync --locked"
+
+[tasks.export]
+description = "Export ChatGPT conversations using private local credentials"
+run = "uv run --locked -- python chatgpt_exporter.py export"
+
+[tasks.probe]
+description = "Read-only endpoint/authentication check; prints shapes, never tokens/content"
+run = "uv run --locked -- python chatgpt_exporter.py probe"
+
+[tasks.import]
+description = "Convert an official JSON/ZIP export offline; pass archive path and options"
+run = "uv run --locked -- python chatgpt_exporter.py import"
+
+[tasks.test]
+description = "Run offline tests (no account or network required)"
+run = "uv run --locked -- pytest"
+
+[tasks.lint]
+description = "Check Python source with locked Ruff"
+run = "uv run --locked -- ruff check ."
+
+[tasks.format]
+description = "Format Python source"
+run = "uv run --locked -- ruff format ."
+
+[tasks."format:check"]
+description = "Check Python formatting without mutation"
+run = "uv run --locked -- ruff format --check ."
+
+[tasks.typecheck]
+description = "Check application types"
+run = "uv run --locked -- mypy chatgpt_exporter.py chatgpt_client.py export_config.py"
+
+[tasks.check]
+description = "Run offline quality gates"
+depends = ["lint", "format:check", "typecheck", "test"]

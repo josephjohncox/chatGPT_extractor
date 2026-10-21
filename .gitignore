@@ -1,0 +1,21 @@
+# Private credentials and account data
+mise.local.toml
+mise.*.local.toml
+.env
+.env.*
+!.env.example
+chatgpt_export*/
+exports/
+.local/
+*.har
+
+# Local tools and caches
+.venv/
+.tools/
+.codebase-index/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.vscode/
+.DS_Store
