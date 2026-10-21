@@ -37,6 +37,13 @@ def boolean(env: Mapping[str, str], name: str, default: bool) -> bool:
     return value in {"true", "1"}
 
 
+def output_directory(value: str) -> Path:
+    """Relative paths are repository-relative under mise; support explicit home paths."""
+    if not value.strip() or "\x00" in value:
+        raise ConfigError("CHATGPT_OUTPUT_DIR must be a nonempty directory path")
+    return Path(value).expanduser()
+
+
 @dataclass(frozen=True)
 class Config:
     session_token: str = field(default="", repr=False)
@@ -53,6 +60,7 @@ class Config:
     max_retries: int = 5
     auto_projects: bool = True
     include_archived: bool = False
+    build_index: bool = True
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
@@ -103,7 +111,7 @@ class Config:
             **secrets,
             workspace_id=workspace,
             projects=tuple(projects),
-            output_dir=Path(env.get("CHATGPT_OUTPUT_DIR", "chatgpt_export")),
+            output_dir=output_directory(env.get("CHATGPT_OUTPUT_DIR", "chatgpt_export")),
             output_format=output_format,
             page_size=int(page_size),
             max_retries=int(retries),
@@ -111,6 +119,7 @@ class Config:
             timeout=number(env, "CHATGPT_TIMEOUT", 30, 0.1),
             auto_projects=boolean(env, "CHATGPT_AUTO_PROJECTS", True),
             include_archived=boolean(env, "CHATGPT_INCLUDE_ARCHIVED", False),
+            build_index=boolean(env, "CHATGPT_BUILD_INDEX", True),
         )
 
     def cookie(self) -> str:

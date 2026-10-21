@@ -44,9 +44,9 @@ Bearer authentication takes precedence; a single cookie takes precedence over sp
 
 ### Generate the local TOML from your browser
 
-Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml** to save a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN` and `CHATGPT_WORKSPACE_ID`. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
+Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, and `CHATGPT_OUTPUT_DIR`. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
 
-The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, replace only those two keys under the existing `[env]` in `mise.local.toml`**, preserving project and output settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
+The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, replace only those three keys under the existing `[env]` in `mise.local.toml`**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
 
 ```sh
 chmod 600 mise.local.toml
@@ -59,6 +59,17 @@ Delete any redundant download after saving the token locally. Do not share or co
 For a managed workspace, copy the `ChatGPT-Account-ID` header from a backend-api request in your browser into `CHATGPT_WORKSPACE_ID`. Use a separate output directory per workspace. A workspace ID is not a project ID.
 
 This working checkout's previously embedded cookies and explicit project list were migrated to the private local file. They are not in the committed example. The existing cookie values have not been proven usable.
+
+## Choose the output directory
+
+Set this under the **existing** `[env]` in private `mise.local.toml`:
+
+```toml
+CHATGPT_OUTPUT_DIR = "~/Documents/ChatGPT/personal"
+CHATGPT_BUILD_INDEX = "true"
+```
+
+Absolute paths, `~`, and relative paths are supported. With mise tasks, relative paths are relative to this repository. `CHATGPT_OUTPUT_DIR` is the destination for export/import and the default source directory for `mise run index`. `--output /another/directory` overrides it for one command. Use separate directories for separate workspaces. The browser credential-file download now asks for this directory too.
 
 ## Commands
 
@@ -77,6 +88,12 @@ mise run export -- --refresh
 
 # Offline: import conversations.json or an official export ZIP.
 mise run import -- /path/to/export.zip --format markdown --output chatgpt_export_offline
+
+# Build a local webpage from the configured directory, without exporting again.
+mise run index
+
+# Or index any older export directory independently (no credentials or network).
+mise run index -- /path/to/previous/export
 
 # Help / direct entry point under the mise environment.
 mise exec -- uv run --locked -- python chatgpt_exporter.py --help
@@ -106,7 +123,8 @@ All of these can go under `[env]` in `mise.local.toml`:
 | `CHATGPT_PROJECTS` | `[]` | JSON array of `[project_id_or_url, folder_name]` overrides/additions |
 | `CHATGPT_AUTO_PROJECTS` | `true` | Discover personal/shared projects via the sidebar endpoint |
 | `CHATGPT_INCLUDE_ARCHIVED` | `false` | Also query the regular archived-conversation listing |
-| `CHATGPT_OUTPUT_DIR` | `chatgpt_export` | Local output directory |
+| `CHATGPT_OUTPUT_DIR` | `chatgpt_export` | Export/import destination and default offline-index directory; supports `~` |
+| `CHATGPT_BUILD_INDEX` | `true` | Automatically build HTML after export/import; `--no-index` also disables it |
 | `CHATGPT_EXPORT_FORMAT` | `json` | `json` or `markdown` |
 | `CHATGPT_PAGE_SIZE` | `100` | Regular listing page size, 1–100 |
 | `CHATGPT_REQUEST_DELAY` | `1` | Minimum seconds between requests |
@@ -126,6 +144,8 @@ Disabling automatic discovery exports only the regular listing and explicitly co
 
 ```text
 chatgpt_export/
+├── index.html                            # open directly in a browser
+├── .chatgpt-index/chats/…html              # generated readable chat pages
 ├── .export-index.json
 ├── _Uncategorized/
 │   └── Title--<conversation-id-hash>.json
@@ -146,9 +166,22 @@ chatgpt_export/
 
 The default export folders, local credentials, HAR files, virtual environment, and index caches are ignored by Git. If you choose a custom output path, place it under an ignored directory or add an ignore rule before committing anything.
 
+## Browse existing exports locally
+
+```sh
+mise run index -- /path/to/old/export
+open /path/to/old/export/index.html   # macOS; otherwise open the file in your browser
+```
+
+This only scans files already on disk. It does not log in, call an API, run an export, or modify the source JSON/Markdown files. Indexing works even if your saved API credentials/configuration are invalid.
+
+The page provides project/folder counts, title/folder/filename search, project filters, update/title/project sorting, readable chat pages, and links to the original JSON/Markdown files. It works directly over `file://`: no local server, npm, CDN, remote fonts, or external requests. See [local index details](docs/local-index.md) for supported layouts, deduplication, templates, and limits.
+
+New exports/imports build the HTML automatically. Disable that with `CHATGPT_BUILD_INDEX = "false"` or `--no-index`, then rebuild explicitly whenever needed. Moving the whole archive preserves relative links; keep the hidden `.chatgpt-index` directory with `index.html`. Generated pages contain private conversation text, not just metadata: do not commit, publish, or share them inadvertently.
+
 ## Development
 
-`export_config.py` validates environment configuration; `chatgpt_client.py` owns read-only transport, authentication, retries, and pagination; `chatgpt_exporter.py` owns rendering, offline import, atomic output, and the CLI. `main.py` delegates to that CLI. Tests disable real network access and clear inherited ChatGPT credentials. CI runs only offline gates and needs no ChatGPT secrets.
+`export_config.py` validates environment configuration; `chatgpt_client.py` owns read-only transport, authentication, retries, and pagination; `chatgpt_exporter.py` owns offline import and the CLI. `conversation_format.py` shares pure rendering between exports and the viewer; `export_io.py` owns atomic private output; `local_index.py` scans archives and builds pages using `templates/index.html` and `templates/conversation.html`. `main.py` delegates to that CLI. Tests disable real network access and clear inherited ChatGPT credentials. CI runs only offline gates and needs no ChatGPT secrets.
 
 ## License
 

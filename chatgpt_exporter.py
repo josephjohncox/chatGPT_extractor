@@ -1,151 +1,32 @@
 #!/usr/bin/env python3
-"""Export ChatGPT web conversations or convert an official data export locally."""
+"""Export/import ChatGPT conversations and build offline chat/project webpages."""
 
 import argparse
 import hashlib
 import json
 import os
-import re
 import sys
-import tempfile
 import zipfile
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from chatgpt_client import ChatGPTClient, ExportError, HTTPError
-from export_config import Config, ConfigError, normalize_project_id
-
-
-def parse_timestamp(value: Any, fmt: str = "%Y-%m-%d %H:%M UTC") -> str:
-    if value is None or value == "":
-        return "Unknown"
-    try:
-        return datetime.fromtimestamp(float(value), UTC).strftime(fmt)
-    except (ValueError, TypeError, OverflowError, OSError):
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-            return dt.astimezone(UTC).strftime(fmt)
-        except ValueError:
-            return "Unknown"
-
-
-def sanitize_filename(name: str) -> str:
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(". ")
-    # Leave room for the ID suffix even on filesystems with byte-counted limits.
-    return name.encode("utf-8")[:100].decode("utf-8", errors="ignore") or "Untitled"
-
-
-def write_text_file(path: Path, text: str) -> None:
-    """Atomic replacement with owner-only permissions; never leave partial exports."""
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, temporary = tempfile.mkstemp(prefix=".export-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(text)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-
-
-def write_json_file(path: Path, payload: Any) -> None:
-    write_text_file(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
-
-
-def decode_json(data: str | bytes) -> Any:
-    try:
-        return json.loads(data)
-    except (ValueError, UnicodeError):
-        raise ExportError("Invalid JSON in archive or export index (content withheld)") from None
-
-
-def extract_messages(detail: dict) -> list[dict]:
-    """Render the selected branch (current_node ancestry), not the first regeneration."""
-    mapping = detail.get("mapping", {})
-    if not isinstance(mapping, dict) or not mapping:
-        return []
-    branch = []
-    visited = set()
-    node_id = detail.get("current_node")
-    if node_id:
-        if node_id not in mapping:
-            raise ExportError("Conversation current_node is absent from mapping; use raw JSON")
-        while node_id:
-            if node_id in visited or node_id not in mapping:
-                raise ExportError(
-                    "Conversation ancestry contains a cycle or missing node; use raw JSON"
-                )
-            visited.add(node_id)
-            branch.append(mapping[node_id])
-            node_id = mapping[node_id].get("parent")
-        branch.reverse()
-    else:
-        # Older archives can omit current_node. The fallback cannot recover selection.
-        node_id = next((key for key, value in mapping.items() if value.get("parent") is None), None)
-        while node_id:
-            if node_id in visited or node_id not in mapping:
-                raise ExportError(
-                    "Conversation tree contains a cycle or missing node; use raw JSON"
-                )
-            visited.add(node_id)
-            node = mapping[node_id]
-            branch.append(node)
-            node_id = next(iter(node.get("children", [])), None)
-    messages = []
-    for node in branch:
-        msg = node.get("message") or {}
-        role = msg.get("author", {}).get("role")
-        if role not in {"user", "assistant"} or msg.get("metadata", {}).get(
-            "is_visually_hidden_from_conversation"
-        ):
-            continue
-        content = msg.get("content") or {}
-        parts = content.get("parts", [])
-        text_parts = []
-        for part in parts:
-            if isinstance(part, str) and part.strip():
-                text_parts.append(part)
-            elif isinstance(part, dict):
-                if part.get("text"):
-                    text_parts.append(str(part["text"]))
-                else:
-                    text_parts.append(
-                        f"[Non-text content: {part.get('content_type', 'attachment')}; preserved in raw JSON]"
-                    )
-        if not parts and content.get("text"):
-            text = str(content["text"])
-            text_parts.append(
-                f"```\n{text}\n```" if content.get("content_type") == "code" else text
-            )
-        if text_parts:
-            messages.append(
-                {
-                    "role": role,
-                    "content": "\n\n".join(text_parts),
-                    "timestamp": parse_timestamp(msg.get("create_time")),
-                }
-            )
-    return messages
-
-
-def conversation_to_markdown(meta: dict, messages: list[dict]) -> str:
-    lines = [
-        f"# {meta.get('title') or 'Untitled'}",
-        "",
-        f"**Created:** {parse_timestamp(meta.get('create_time'))}  ",
-        f"**Last updated:** {parse_timestamp(meta.get('update_time'))}",
-        "",
-        "---",
-        "",
-    ]
-    for msg in messages:
-        label = "You" if msg["role"] == "user" else "ChatGPT"
-        lines.extend([f"**{label}** _{msg['timestamp']}_", "", msg["content"], "", "---", ""])
-    return "\n".join(lines)
+from conversation_format import (
+    conversation_to_markdown,
+)
+from conversation_format import (
+    extract_messages as extract_messages,
+)
+from conversation_format import (
+    parse_timestamp as parse_timestamp,
+)
+from conversation_format import (
+    sanitize_filename as sanitize_filename,
+)
+from export_config import Config, ConfigError, normalize_project_id, output_directory
+from export_io import decode_json, write_text_file
+from export_io import write_json_file as write_json_file
+from local_index import build_index
 
 
 def export_auxiliary_data(client: ChatGPTClient, token: str, root: Path) -> None:
@@ -302,19 +183,37 @@ def load_archive(path: Path) -> list[dict]:
     return data
 
 
+def generate_local_index(directory: Path) -> int:
+    result = build_index(directory)
+    print(
+        f"Local index: {result.chats} chats; {result.projects} folders; {len(result.warnings)} warnings; {result.ignored} non-chat JSON files ignored"
+    )
+    print(f"Open: {result.path}")
+    return int(bool(result.warnings))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", nargs="?", choices=["export", "probe", "import"], default="export"
+        "command", nargs="?", choices=["export", "probe", "import", "index"], default="export"
     )
     parser.add_argument(
         "archive",
         nargs="?",
         type=Path,
-        help="conversations.json or official export ZIP (import only)",
+        help="Archive file (import) or existing export directory (index)",
     )
     parser.add_argument("--format", choices=["json", "markdown"])
-    parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Export output directory; for index, an alternative to the directory argument",
+    )
+    parser.add_argument(
+        "--no-index",
+        action="store_true",
+        help="Do not build HTML after export/import (CHATGPT_BUILD_INDEX=false also disables this)",
+    )
     parser.add_argument(
         "--refresh", action="store_true", help="Refetch even if metadata is unchanged"
     )
@@ -324,16 +223,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "import" and args.archive is None:
         parser.error("import requires an archive path")
-    if args.command != "import" and args.archive is not None:
-        parser.error("archive path is valid only for import")
+    if args.command not in {"import", "index"} and args.archive is not None:
+        parser.error("a source path is valid only for import or index")
+    if args.command == "index" and args.archive is not None and args.output is not None:
+        parser.error("index accepts a directory argument or --output, not both")
     try:
         from dataclasses import replace
 
+        if args.command == "index":
+            # Indexing needs only the directory setting, never authentication or API config.
+            directory = (
+                args.archive
+                or args.output
+                or output_directory(os.environ.get("CHATGPT_OUTPUT_DIR", "chatgpt_export"))
+            )
+            return generate_local_index(directory)
         config = Config.from_env()
         config = replace(
             config,
             output_format=args.format or config.output_format,
-            output_dir=args.output or config.output_dir,
+            output_dir=output_directory(str(args.output or config.output_dir)),
         )
         if args.command == "import":
             assert args.archive is not None
@@ -344,9 +253,12 @@ def main(argv: list[str] | None = None) -> int:
                 if not isinstance(ident, str) or not ident or ident in by_id:
                     raise ExportError("Archive has a missing or duplicate conversation ID")
                 by_id[ident] = item
-            return export_conversations(
+            result = export_conversations(
                 conversations, by_id.__getitem__, config, refresh=args.refresh
             )
+            if config.build_index and not args.no_index:
+                result = max(result, generate_local_index(config.output_dir))
+            return result
         client = ChatGPTClient(config)
         if args.command == "probe":
             report = client.probe()
@@ -362,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.auxiliary:
             export_auxiliary_data(client, token, config.output_dir)
+        if config.build_index and not args.no_index:
+            result = max(result, generate_local_index(config.output_dir))
         return result
     except (ConfigError, ExportError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

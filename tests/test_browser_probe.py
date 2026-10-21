@@ -25,7 +25,7 @@ const source = fs.readFileSync(0, 'utf8');
 const output = { downloads: [], requests: [], confirmations: 0, removed: 0, revoked: 0 };
 const context = {
   location: { origin: 'https://chatgpt.com' },
-  prompt: () => options.workspace,
+  prompt: message => message.startsWith('Export output directory') ? options.outputDir : options.workspace,
   confirm: () => { output.confirmations++; return options.download; },
   fetch: async (path, config) => {
     output.requests.push(path);
@@ -64,6 +64,7 @@ def probe(**overrides):
     options = {
         "workspace": "workspace-test",
         "download": True,
+        "outputDir": "chatgpt_export",
         "status": 200,
         "token": 'fake-"token\\path\x7f',
         **overrides,
@@ -88,10 +89,12 @@ def test_download_is_valid_mise_toml_and_report_stays_redacted(workspace):
     assert env == {
         "CHATGPT_ACCESS_TOKEN": options["token"],
         "CHATGPT_WORKSPACE_ID": workspace,
+        "CHATGPT_OUTPUT_DIR": options["outputDir"],
     }
     config = Config.from_env(env)
     assert config.access_token == options["token"]
     assert config.workspace_id == workspace
+    assert config.output_dir == Path(options["outputDir"])
     assert options["token"] not in json.dumps(result["report"])
     assert result["removed"] == result["revoked"] == 1
     assert len(result["requests"]) == 4
@@ -124,6 +127,25 @@ def test_invalid_workspace_does_not_download_or_probe_endpoints():
     assert "Expected an account ID" in result["error"]
     assert result["downloads"] == []
     assert result["requests"] == ["/api/auth/session"]
+
+
+@pytest.mark.parametrize("directory", ["", " ", "bad\x00path"])
+def test_invalid_output_directory_never_downloads(directory):
+    result, _ = probe(outputDir=directory)
+    assert result["report"]["credential_file"] == "invalid_output_directory"
+    assert result["downloads"] == []
+
+
+def test_cancelling_directory_prompt_never_downloads():
+    result, _ = probe(outputDir=None)
+    assert result["report"]["credential_file"] == "cancelled"
+    assert result["downloads"] == []
+
+
+def test_directory_with_spaces_and_quotes_is_valid_toml():
+    directory = '/tmp/ChatGPT "private" archives'
+    result, _ = probe(outputDir=directory)
+    assert tomllib.loads(result["downloads"][0])["env"]["CHATGPT_OUTPUT_DIR"] == directory
 
 
 def test_failed_download_is_redacted_and_blob_is_released():

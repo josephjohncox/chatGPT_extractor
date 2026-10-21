@@ -1,0 +1,71 @@
+{{MARKER}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>{{DIRECTORY}} · ChatGPT archive</title>
+<style>
+:root{color-scheme:light dark;--bg:#f4f7fa;--panel:#fff;--text:#172332;--muted:#536475;--line:#dce4ed;--accent:#076b82}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif}a{color:var(--accent);text-underline-offset:3px}button,input,select{font:inherit}header{padding:2rem 2.5rem;background:var(--panel);border-bottom:1px solid var(--line)}h1{font-size:1.8rem;margin:.25rem 0;overflow-wrap:anywhere}.eyebrow{color:var(--accent);font-weight:700;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}.muted{color:var(--muted)}.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:1.5rem;padding:1.5rem 2.5rem}aside{align-self:start;position:sticky;top:1rem;max-height:90vh;overflow:auto}aside h2{font-size:1rem;margin-top:0}.project-button{display:flex;justify-content:space-between;gap:.5rem;width:100%;text-align:left;padding:.7rem;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer;overflow-wrap:anywhere}.project-button:hover,.project-button[aria-pressed="true"]{background:var(--panel);color:var(--accent)}.project-button span{color:var(--muted)}.controls{display:flex;flex-wrap:wrap;gap:.8rem;align-items:end;margin-bottom:1rem}.controls label{display:flex;flex-direction:column;gap:.3rem;font-size:.85rem}.controls label:first-child{flex:1;min-width:200px}input,select{border:1px solid var(--line);border-radius:6px;padding:.6rem;background:var(--panel);color:var(--text)}.table-wrap{overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.9rem;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-size:.8rem;white-space:nowrap}.chat-title{font-weight:600}td:first-child{min-width:220px;width:52%;overflow-wrap:anywhere}td:nth-child(3),td:nth-child(4){font-size:.85rem;white-space:nowrap}tr:last-child td{border-bottom:0}.notice{padding:1rem;background:var(--panel);border:1px solid var(--line);border-radius:6px;margin-bottom:1rem}#empty{padding:1rem}footer{padding:0 2.5rem 2rem;font-size:.85rem;color:var(--muted)}[hidden]{display:none!important}
+@media(prefers-color-scheme:dark){:root{--bg:#101820;--panel:#18232f;--text:#e2eaf3;--muted:#a1b0c1;--line:#304255;--accent:#6ed6df}}
+@media(max-width:800px){header{padding:1.2rem}.layout{grid-template-columns:1fr;padding:1rem}aside{position:static;max-height:200px}footer{padding:0 1rem 1rem}}
+</style>
+</head>
+<body>
+<header><div class="eyebrow">Local ChatGPT archive</div><h1>{{DIRECTORY}}</h1><div class="muted">{{CHAT_COUNT}} chats · {{PROJECT_COUNT}} folders · Built {{BUILT_AT}}</div></header>
+<div class="layout">
+<aside aria-label="Project folders"><h2>Projects &amp; folders</h2>{{PROJECT_BUTTONS}}</aside>
+<main>
+{{WARNINGS}}
+<div class="controls">
+<label>Search titles, folders, or filenames<input id="search" type="search" placeholder="Find a conversation…" autocomplete="off"></label>
+<label>Project<select id="project"><option value="">All projects</option>{{OPTIONS}}</select></label>
+<label>Sort<select id="sort"><option value="updated">Recently updated</option><option value="title">Title A–Z</option><option value="project">Project A–Z</option></select></label>
+</div>
+<p id="count" class="muted" aria-live="polite">{{CHAT_COUNT}} chats</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Conversation</th><th scope="col">Project / folder</th><th scope="col">Updated</th><th scope="col">Source files</th></tr></thead><tbody id="chats">{{ROWS}}</tbody></table><p id="empty" hidden>No conversations match these filters.</p></div>
+<noscript><p>JavaScript is disabled. All chats and local file links are still listed above.</p></noscript>
+</main>
+</div>
+<footer>Private, offline snapshot. Chat pages contain plain text; HTML in conversations is never executed. No network requests or external assets. Rebuild the index after files change.</footer>
+<script>
+(() => {
+  const search = document.getElementById("search");
+  const project = document.getElementById("project");
+  const sort = document.getElementById("sort");
+  const table = document.getElementById("chats");
+  const rows = Array.from(table.rows);
+  const buttons = Array.from(document.querySelectorAll(".project-button"));
+  function update() {
+    const query = search.value.trim().toLocaleLowerCase();
+    let count = 0;
+    rows.forEach(row => {
+      row.hidden = (project.value && row.dataset.project !== project.value) || !row.dataset.search.includes(query);
+      if (!row.hidden) count++;
+    });
+    rows.sort((a, b) => {
+      if (sort.value === "updated") {
+        const time = (Number(b.dataset.updated || "-Infinity") - Number(a.dataset.updated || "-Infinity"));
+        if (time) return time;
+      } else if (sort.value === "project") {
+        const folder = a.dataset.project.localeCompare(b.dataset.project);
+        if (folder) return folder;
+      }
+      return a.dataset.title.localeCompare(b.dataset.title);
+    });
+    rows.forEach(row => table.appendChild(row));
+    buttons.forEach(button => button.setAttribute("aria-pressed", String(button.dataset.project === project.value)));
+    document.getElementById("count").textContent = count + " of " + rows.length + " chats";
+    document.getElementById("empty").hidden = count > 0;
+  }
+  buttons.forEach(button => button.addEventListener("click", () => { project.value = button.dataset.project; update(); }));
+  search.addEventListener("input", update);
+  project.addEventListener("change", update);
+  sort.addEventListener("change", update);
+  update();
+})();
+</script>
+</body>
+</html>

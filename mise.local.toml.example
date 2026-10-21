@@ -17,6 +17,11 @@ CHATGPT_PROJECTS = '[]'
 CHATGPT_AUTO_PROJECTS = "true"
 CHATGPT_INCLUDE_ARCHIVED = "false"
 CHATGPT_EXPORT_FORMAT = "json"
+# Output for export/import; also the default directory for the offline index.
+# Absolute paths and ~ are supported; relative paths are repository-relative under mise.
 CHATGPT_OUTPUT_DIR = "chatgpt_export"
+# Example: CHATGPT_OUTPUT_DIR = "~/Documents/ChatGPT/personal"
+# Generate a local HTML index automatically after export/import.
+CHATGPT_BUILD_INDEX = "true"
 CHATGPT_REQUEST_DELAY = "1"
 CHATGPT_TIMEOUT = "30"

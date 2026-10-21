@@ -42,21 +42,34 @@
     }
   }
   if (confirm(
-    "Download mise.local.toml containing your secret ChatGPT access token and the workspace ID you entered? " +
+    "Download mise.local.toml containing your secret ChatGPT access token, workspace ID, and export output directory? " +
     "Keep this file private. It will not replace your repository's existing local config automatically."
   )) {
+    const outputDirectory = prompt(
+      "Export output directory (absolute path, ~/path, or repository-relative path). The browser will not access this directory:",
+      "chatgpt_export"
+    );
+    if (outputDirectory === null) {
+      report.credential_file = "cancelled";
+      return report;
+    }
+    if (!outputDirectory.trim() || outputDirectory.includes("\u0000")) {
+      report.credential_file = "invalid_output_directory";
+      return report;
+    }
     // JSON basic-string escaping is also valid TOML for these credential values.
     const tomlString = (value) => JSON.stringify(value).replace(
       /[\u007f-\u009f]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
     );
     const toml = [
       "# PRIVATE: contains a ChatGPT bearer token. Do not commit or share.",
-      "# If mise.local.toml already exists, replace only these two keys under its [env].",
+      "# If mise.local.toml already exists, replace only the listed keys under its [env].",
       "# Preserve your existing project/output settings. Do not add a second [env] table.",
       "# After saving in your repository: chmod 600 mise.local.toml",
       "[env]",
       `CHATGPT_ACCESS_TOKEN = ${tomlString(session.accessToken)}`,
       `CHATGPT_WORKSPACE_ID = ${tomlString(workspace)}`,
+      `CHATGPT_OUTPUT_DIR = ${tomlString(outputDirectory)}`,
       "",
     ].join("\n");
     const url = URL.createObjectURL(new Blob([toml], { type: "text/plain;charset=utf-8" }));
