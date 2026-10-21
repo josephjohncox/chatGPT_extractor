@@ -40,6 +40,9 @@ CHATGPT_OUTPUT_DIR = "chatgpt_export"
 # Generate index.html and .chatgpt-index/chats/ automatically after export/import.
 # Set false or pass --no-index to disable; original JSON/Markdown is unchanged.
 CHATGPT_BUILD_INDEX = "true"
+# Rich progress on stderr in terminals; timestamped progress when redirected.
+# Set false or pass --no-progress to suppress progress; results/errors remain.
+CHATGPT_PROGRESS = "true"
 # Rebuild the configured directory without exporting/authenticating: mise run index
 # Any existing export directory: mise run index -- /path/to/previous/export
 # Relative links work directly in a browser; no server required.

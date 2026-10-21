@@ -15,6 +15,7 @@ from urllib.parse import quote
 from chatgpt_client import ExportError
 from conversation_format import extract_messages, parse_timestamp
 from export_io import decode_json, write_text_file
+from progress_report import NO_PROGRESS, ProgressReporter
 
 MARKER = "<!-- chatgpt-extractor local index v1 -->"
 SITE = ".chatgpt-index"
@@ -104,99 +105,118 @@ def records(data: Any) -> list[tuple[dict, int | None]]:
     return []
 
 
-def scan_directory(root: Path) -> tuple[list[Chat], int, list[str]]:
+def scan_directory(
+    root: Path, *, progress: ProgressReporter | None = None
+) -> tuple[list[Chat], int, list[str]]:
     """Ignore auxiliary/hidden trees and never follow source symlinks."""
     chats: dict[str, Chat] = {}
     aliases: dict[Path, str] = {}
     markdown = []
     ignored = 0
     warnings = []
+    report = progress if progress is not None else NO_PROGRESS
+    source_number = 0
 
     def walk_error(_: OSError) -> None:
         warnings.append("A subdirectory could not be read")
 
-    for directory, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
-        parent = Path(directory)
-        dirs[:] = sorted(
-            name
-            for name in dirs
-            if not name.startswith(".")
-            and name != "node_modules"
-            and not (parent == root and name in {"settings", "memories"})
-            and not (parent / name).is_symlink()
-        )
-        for name in sorted(files):
-            path = parent / name
-            relative = path.relative_to(root)
-            if name.startswith(".") or path.suffix.lower() not in {".json", ".md", ".markdown"}:
-                continue
-            if path.is_symlink() or not path.resolve().is_relative_to(root):
-                warnings.append(f"{relative}: skipped a source symlink or escaping path")
-                continue
-            if path.suffix.lower() in {".md", ".markdown"}:
-                markdown.append(path)
-                continue
-            try:
-                found = records(read_json(path))
-                if not found:
-                    ignored += 1
+    with report.stage("Scan export directory") as work:
+        for directory, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
+            parent = Path(directory)
+            dirs[:] = sorted(
+                name
+                for name in dirs
+                if not name.startswith(".")
+                and name != "node_modules"
+                and not (parent == root and name in {"settings", "memories"})
+                and not (parent / name).is_symlink()
+            )
+            for name in sorted(files):
+                path = parent / name
+                relative = path.relative_to(root)
+                if name.startswith(".") or path.suffix.lower() not in {".json", ".md", ".markdown"}:
                     continue
-                for detail, position in found:
-                    ident = detail.get("id") or detail.get("conversation_id")
-                    key = (
-                        f"id:{ident}"
-                        if isinstance(ident, str) and ident
-                        else f"file:{relative.as_posix()}:{position}"
+                source_number += 1
+                work.update(
+                    completed=source_number,
+                    detail=f"{len(chats)} chats discovered; {ignored} non-chat JSON; {len(warnings)} warnings",
+                )
+                if path.is_symlink() or not path.resolve().is_relative_to(root):
+                    warnings.append(f"{relative}: skipped a source symlink or escaping path")
+                    continue
+                if path.suffix.lower() in {".md", ".markdown"}:
+                    markdown.append(path)
+                    continue
+                try:
+                    found = records(read_json(path))
+                    if not found:
+                        ignored += 1
+                        continue
+                    for detail, position in found:
+                        ident = detail.get("id") or detail.get("conversation_id")
+                        key = (
+                            f"id:{ident}"
+                            if isinstance(ident, str) and ident
+                            else f"file:{relative.as_posix()}:{position}"
+                        )
+                        updated = timestamp(detail.get("update_time"))
+                        if key not in chats:
+                            chats[key] = Chat(
+                                key,
+                                str(detail.get("title") or fallback_title(path)),
+                                project_name(relative),
+                                timestamp(detail.get("create_time")),
+                                updated,
+                            )
+                        chat = chats[key]
+                        if updated is not None and (chat.updated is None or updated > chat.updated):
+                            chat.title = str(detail.get("title") or fallback_title(path))
+                            chat.project = project_name(relative)
+                            chat.created = timestamp(detail.get("create_time"))
+                            chat.updated = updated
+                        chat.raw.append(Source(path, position, updated))
+                        if position is None:
+                            aliases[relative.with_suffix("")] = key
+                except (OSError, ValueError, ExportError):
+                    warnings.append(f"{relative}: unable to read conversation JSON")
+        with report.stage(
+            "Read Markdown sources", total=len(markdown), transient=True
+        ) as markdown_work:
+            for path in markdown:
+                relative = path.relative_to(root)
+                try:
+                    text = read_text(path)
+                    key = aliases.get(
+                        relative.with_suffix(""), f"markdown:{relative.with_suffix('').as_posix()}"
                     )
-                    updated = timestamp(detail.get("update_time"))
                     if key not in chats:
+                        heading = re.search(r"(?m)^#\s+(.+?)\s*$", text)
+                        dates = dict(
+                            re.findall(r"(?m)^\*\*(Created|Last updated):\*\*\s*([^\r\n]+)", text)
+                        )
                         chats[key] = Chat(
                             key,
-                            str(detail.get("title") or fallback_title(path)),
+                            heading[1] if heading else fallback_title(path),
                             project_name(relative),
-                            timestamp(detail.get("create_time")),
-                            updated,
+                            timestamp(dates.get("Created")),
+                            timestamp(dates.get("Last updated")),
                         )
-                    chat = chats[key]
-                    if updated is not None and (chat.updated is None or updated > chat.updated):
-                        chat.title = str(detail.get("title") or fallback_title(path))
-                        chat.project = project_name(relative)
-                        chat.created = timestamp(detail.get("create_time"))
-                        chat.updated = updated
-                    chat.raw.append(Source(path, position, updated))
-                    if position is None:
-                        aliases[relative.with_suffix("")] = key
-            except (OSError, ValueError, ExportError):
-                warnings.append(f"{relative}: unable to read conversation JSON")
-    for path in markdown:
-        relative = path.relative_to(root)
-        try:
-            text = read_text(path)
-            key = aliases.get(
-                relative.with_suffix(""), f"markdown:{relative.with_suffix('').as_posix()}"
-            )
-            if key not in chats:
-                heading = re.search(r"(?m)^#\s+(.+?)\s*$", text)
-                dates = dict(re.findall(r"(?m)^\*\*(Created|Last updated):\*\*\s*([^\r\n]+)", text))
-                chats[key] = Chat(
-                    key,
-                    heading[1] if heading else fallback_title(path),
-                    project_name(relative),
-                    timestamp(dates.get("Created")),
-                    timestamp(dates.get("Last updated")),
-                )
-            chats[key].markdown.append(path)
-        except (OSError, ValueError, ExportError):
-            warnings.append(f"{relative}: unable to read conversation Markdown")
-    read_json.cache_clear()
-    return (
-        sorted(
-            chats.values(),
-            key=lambda chat: (chat.project.casefold(), chat.title.casefold(), chat.key),
-        ),
-        ignored,
-        warnings,
-    )
+                    chats[key].markdown.append(path)
+                except (OSError, ValueError, ExportError):
+                    warnings.append(f"{relative}: unable to read conversation Markdown")
+                markdown_work.advance(detail=f"{len(chats)} chats; {len(warnings)} warnings")
+        work.finish(
+            f"{source_number} candidate files; {len(chats)} chats; {ignored} non-chat JSON; {len(warnings)} warnings"
+        )
+        read_json.cache_clear()
+        return (
+            sorted(
+                chats.values(),
+                key=lambda chat: (chat.project.casefold(), chat.title.casefold(), chat.key),
+            ),
+            ignored,
+            warnings,
+        )
 
 
 def render_template(name: str, values: dict[str, str]) -> str:
@@ -244,7 +264,8 @@ def conversation_body(chat: Chat) -> str:
     )
 
 
-def build_index(directory: Path) -> IndexResult:
+def build_index(directory: Path, *, progress: ProgressReporter | None = None) -> IndexResult:
+    report = progress if progress is not None else NO_PROGRESS
     root = directory.expanduser().resolve()
     if not root.is_dir():
         raise ExportError("Index source must be an existing export directory")
@@ -272,49 +293,53 @@ def build_index(directory: Path) -> IndexResult:
     if not ownership.exists():
         site.chmod(0o700)
         write_text_file(ownership, MARKER)
-    chats, ignored, warnings = scan_directory(root)
+    chats, ignored, warnings = scan_directory(root, progress=report)
     rows = []
     projects: dict[str, int] = {}
     try:
-        for chat in chats:
-            projects[chat.project] = projects.get(chat.project, 0) + 1
-            page = pages / (hashlib.sha256(chat.key.encode()).hexdigest()[:32] + ".html")
-            if page.is_symlink() or not page.resolve().is_relative_to(root):
-                raise ExportError("Generated chat page path escapes the export directory")
-            try:
-                body = conversation_body(chat)
-            except (OSError, ValueError, TypeError, KeyError, AttributeError, ExportError):
-                body = '<p class="notice">Unable to render this conversation. The source file links below are still available.</p>'
-                warnings.append(f"{chat.title}: could not render messages; source files retained")
-            write_text_file(
-                page,
-                render_template(
-                    "conversation.html",
-                    {
-                        "MARKER": MARKER,
-                        "TITLE": html.escape(chat.title),
-                        "PROJECT": html.escape(chat.project),
-                        "CREATED": html.escape(parse_timestamp(chat.created)),
-                        "UPDATED": html.escape(parse_timestamp(chat.updated)),
-                        "CONTENT": body,
-                        "SOURCES": source_links(chat, pages),
-                    },
-                ),
-            )
-            search = " ".join(
-                [
-                    chat.title,
-                    chat.project,
-                    *(str(source.path.relative_to(root)) for source in chat.raw),
-                    *(str(path.relative_to(root)) for path in chat.markdown),
-                ]
-            )
-            updated = str(chat.updated) if chat.updated is not None else ""
-            rows.append(
-                f'<tr data-project="{html.escape(chat.project, quote=True)}" data-search="{html.escape(search.casefold(), quote=True)}" data-title="{html.escape(chat.title.casefold(), quote=True)}" data-updated="{updated}">'
-                f'<td><a class="chat-title" href="{html.escape(local_link(page, root), quote=True)}">{html.escape(chat.title)}</a></td>'
-                f"<td>{html.escape(chat.project)}</td><td>{html.escape(parse_timestamp(chat.updated))}</td><td>{source_links(chat, root)}</td></tr>"
-            )
+        with report.stage("Build readable chat pages", total=len(chats)) as work:
+            for chat in chats:
+                projects[chat.project] = projects.get(chat.project, 0) + 1
+                page = pages / (hashlib.sha256(chat.key.encode()).hexdigest()[:32] + ".html")
+                if page.is_symlink() or not page.resolve().is_relative_to(root):
+                    raise ExportError("Generated chat page path escapes the export directory")
+                try:
+                    body = conversation_body(chat)
+                except (OSError, ValueError, TypeError, KeyError, AttributeError, ExportError):
+                    body = '<p class="notice">Unable to render this conversation. The source file links below are still available.</p>'
+                    warnings.append(
+                        f"{chat.title}: could not render messages; source files retained"
+                    )
+                write_text_file(
+                    page,
+                    render_template(
+                        "conversation.html",
+                        {
+                            "MARKER": MARKER,
+                            "TITLE": html.escape(chat.title),
+                            "PROJECT": html.escape(chat.project),
+                            "CREATED": html.escape(parse_timestamp(chat.created)),
+                            "UPDATED": html.escape(parse_timestamp(chat.updated)),
+                            "CONTENT": body,
+                            "SOURCES": source_links(chat, pages),
+                        },
+                    ),
+                )
+                search = " ".join(
+                    [
+                        chat.title,
+                        chat.project,
+                        *(str(source.path.relative_to(root)) for source in chat.raw),
+                        *(str(path.relative_to(root)) for path in chat.markdown),
+                    ]
+                )
+                updated = str(chat.updated) if chat.updated is not None else ""
+                rows.append(
+                    f'<tr data-project="{html.escape(chat.project, quote=True)}" data-search="{html.escape(search.casefold(), quote=True)}" data-title="{html.escape(chat.title.casefold(), quote=True)}" data-updated="{updated}">'
+                    f'<td><a class="chat-title" href="{html.escape(local_link(page, root), quote=True)}">{html.escape(chat.title)}</a></td>'
+                    f"<td>{html.escape(chat.project)}</td><td>{html.escape(parse_timestamp(chat.updated))}</td><td>{source_links(chat, root)}</td></tr>"
+                )
+                work.advance(detail=f"{work.completed + 1} pages written; {len(warnings)} warnings")
         project_names = sorted(projects, key=str.casefold)
         options = "".join(
             f'<option value="{html.escape(name, quote=True)}">{html.escape(name)} ({projects[name]})</option>'
@@ -333,23 +358,27 @@ def build_index(directory: Path) -> IndexResult:
             if warnings
             else ""
         )
-        write_text_file(
-            index,
-            render_template(
-                "index.html",
-                {
-                    "MARKER": MARKER,
-                    "DIRECTORY": html.escape(root.name),
-                    "CHAT_COUNT": str(len(chats)),
-                    "PROJECT_COUNT": str(len(projects)),
-                    "BUILT_AT": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
-                    "ROWS": "\n".join(rows),
-                    "OPTIONS": options,
-                    "PROJECT_BUTTONS": buttons,
-                    "WARNINGS": warning_html,
-                },
-            ),
-        )
+        with report.stage("Write HTML catalog", total=1) as catalog_work:
+            write_text_file(
+                index,
+                render_template(
+                    "index.html",
+                    {
+                        "MARKER": MARKER,
+                        "DIRECTORY": html.escape(root.name),
+                        "CHAT_COUNT": str(len(chats)),
+                        "PROJECT_COUNT": str(len(projects)),
+                        "BUILT_AT": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
+                        "ROWS": "\n".join(rows),
+                        "OPTIONS": options,
+                        "PROJECT_BUTTONS": buttons,
+                        "WARNINGS": warning_html,
+                    },
+                ),
+            )
+            catalog_work.advance(
+                detail=f"{len(chats)} chats; {len(projects)} folders; {len(warnings)} warnings"
+            )
     finally:
         read_json.cache_clear()
     return IndexResult(index, len(chats), len(projects), ignored, warnings)

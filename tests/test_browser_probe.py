@@ -114,6 +114,8 @@ def test_download_documents_output_index_projects_and_cookie_alternatives():
         "index.html",
         ".chatgpt-index/chats/",
         "CHATGPT_AUTO_PROJECTS",
+        "CHATGPT_PROGRESS",
+        "--no-progress",
         "CHATGPT_PROJECTS",
         "CHATGPT_SESSION_TOKEN_0",
         "CHATGPT_SESSION_TOKEN_1",

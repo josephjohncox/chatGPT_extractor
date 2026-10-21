@@ -67,6 +67,7 @@ class Config:
     auto_projects: bool = True
     include_archived: bool = False
     build_index: bool = True
+    progress: bool = True
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
@@ -138,6 +139,7 @@ class Config:
             auto_projects=boolean(env, "CHATGPT_AUTO_PROJECTS", True),
             include_archived=boolean(env, "CHATGPT_INCLUDE_ARCHIVED", False),
             build_index=boolean(env, "CHATGPT_BUILD_INDEX", True),
+            progress=boolean(env, "CHATGPT_PROGRESS", True),
         )
 
     def cookie(self) -> str:

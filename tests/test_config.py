@@ -40,6 +40,7 @@ def test_cookie_shapes(env, cookie):
         {"CHATGPT_REQUEST_DELAY": "nan"},
         {"CHATGPT_REQUEST_DELAY": "-1"},
         {"CHATGPT_AUTO_PROJECTS": "maybe"},
+        {"CHATGPT_PROGRESS": "maybe"},
         {"CHATGPT_INCLUDE_ARCHIVED": "yes"},
         {"CHATGPT_EXPORT_FORMAT": "xml"},
         {"CHATGPT_WORKSPACE_ID": "bad\r\nHeader"},

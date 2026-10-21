@@ -9,6 +9,7 @@ from urllib.parse import quote
 import requests
 
 from export_config import Config, normalize_project_id
+from progress_report import NO_PROGRESS, ProgressReporter, human_bytes
 
 BASE_URL = "https://chatgpt.com/backend-api"
 
@@ -59,9 +60,16 @@ def retry_delay(value: str | None, attempt: int) -> float:
 
 
 class ChatGPTClient:
-    def __init__(self, config: Config, session: requests.Session | None = None):
+    def __init__(
+        self,
+        config: Config,
+        session: requests.Session | None = None,
+        *,
+        progress: ProgressReporter | None = None,
+    ):
         self.config = config
         self.session = session if session is not None else requests.Session()
+        self.progress = progress if progress is not None else NO_PROGRESS
         self._last_request: float | None = None
 
     def headers(self, token: str = "") -> dict[str, str]:
@@ -76,6 +84,14 @@ class ChatGPTClient:
             headers["ChatGPT-Account-ID"] = self.config.workspace_id
         return headers
 
+    def _wait(self, seconds: float, reason: str) -> None:
+        if seconds > 0:
+            with self.progress.stage(
+                "Waiting", total=1, detail=f"{reason}; {seconds:.1f}s", transient=True
+            ) as work:
+                time.sleep(seconds)
+                work.advance()
+
     def get(
         self, url: str, *, headers: dict[str, str], params: dict[str, Any] | None = None, label: str
     ) -> requests.Response:
@@ -83,33 +99,52 @@ class ChatGPTClient:
             raise ExportError("Refusing to send ChatGPT credentials to another origin")
         for attempt in range(self.config.max_retries + 1):
             if self._last_request is not None:
-                time.sleep(
-                    max(0, self.config.request_delay - (time.monotonic() - self._last_request))
-                )
+                delay = max(0, self.config.request_delay - (time.monotonic() - self._last_request))
+                self._wait(delay, "request pacing")
             try:
-                self._last_request = time.monotonic()
-                response = self.session.get(
-                    url,
-                    headers=headers,
-                    params=params,
-                    timeout=self.config.timeout,
-                    allow_redirects=False,
-                )
+                with self.progress.stage(
+                    f"HTTP {label.split(' (', 1)[0]}",
+                    total=1,
+                    transient=True,
+                    detail=f"attempt {attempt + 1}/{self.config.max_retries + 1}; timeout {self.config.timeout:.1f}s",
+                ) as request:
+                    self._last_request = time.monotonic()
+                    response = self.session.get(
+                        url,
+                        headers=headers,
+                        params=params,
+                        timeout=self.config.timeout,
+                        allow_redirects=False,
+                    )
+                    request.advance(
+                        detail=f"HTTP {response.status_code}; {human_bytes(len(response.content))}"
+                    )
+                    request.finish(state="received")
             except requests.RequestException:
                 if attempt == self.config.max_retries:
+                    self.progress.notice("Network retries exhausted; request details withheld")
                     raise ExportError(
                         f"{label}: network request failed after retries (details withheld)"
                     ) from None
-                time.sleep(retry_delay(None, attempt))
+                delay = retry_delay(None, attempt)
+                self.progress.notice(
+                    f"Retry: network failure; next attempt {attempt + 2}/{self.config.max_retries + 1}; backoff {delay:.1f}s"
+                )
+                self._wait(delay, "network retry backoff")
                 continue
             if response.headers.get("cf-mitigated", "").strip().lower() == "challenge":
+                self.progress.notice("Browser challenge detected; not retrying as rate limiting")
                 return response
             if (
                 response.status_code not in {429, 500, 502, 503, 504}
                 or attempt == self.config.max_retries
             ):
                 return response
-            time.sleep(retry_delay(response.headers.get("Retry-After"), attempt))
+            delay = retry_delay(response.headers.get("Retry-After"), attempt)
+            self.progress.notice(
+                f"Retry: HTTP {response.status_code}; next attempt {attempt + 2}/{self.config.max_retries + 1}; backoff {delay:.1f}s"
+            )
+            self._wait(delay, "HTTP retry backoff")
         raise ExportError(f"{label}: no response")
 
     def json(
@@ -136,25 +171,30 @@ class ChatGPTClient:
         return payload
 
     def access_token(self) -> str:
-        if self.config.access_token:
-            return self.config.access_token
-        cookie = self.config.cookie()
-        if not cookie:
-            raise ExportError(
-                "Set CHATGPT_ACCESS_TOKEN or CHATGPT_SESSION_TOKEN[_0/_1] in mise.local.toml, then run through mise"
+        with self.progress.stage("Authentication", total=1) as work:
+            if self.config.access_token:
+                work.advance(detail="configured bearer selected; backend verification follows")
+                return self.config.access_token
+            cookie = self.config.cookie()
+            if not cookie:
+                raise ExportError(
+                    "Set CHATGPT_ACCESS_TOKEN or CHATGPT_SESSION_TOKEN[_0/_1] in mise.local.toml, then run through mise"
+                )
+            headers = self.headers()
+            headers["Cookie"] = cookie
+            response = self.get(
+                "https://chatgpt.com/api/auth/session",
+                headers=headers,
+                label="session authentication",
             )
-        headers = self.headers()
-        headers["Cookie"] = cookie
-        response = self.get(
-            "https://chatgpt.com/api/auth/session", headers=headers, label="session authentication"
-        )
-        payload = self.decode(response, "session authentication")
-        token = payload.get("accessToken")
-        if not isinstance(token, str) or not token:
-            raise ExportError(
-                "Session has no accessToken; refresh the ChatGPT session cookie or set CHATGPT_ACCESS_TOKEN"
-            )
-        return token
+            payload = self.decode(response, "session authentication")
+            token = payload.get("accessToken")
+            if not isinstance(token, str) or not token:
+                raise ExportError(
+                    "Session has no accessToken; refresh the ChatGPT session cookie or set CHATGPT_ACCESS_TOKEN"
+                )
+            work.advance(detail="cookie exchange completed; access token received")
+            return token
 
     @staticmethod
     def items(payload: dict, *keys: str) -> list[dict]:
@@ -169,120 +209,180 @@ class ChatGPTClient:
     def conversations(
         self, token: str, project_id: str = "", folder_name: str = "", *, archived: bool = False
     ) -> list[dict]:
-        output: dict[str, dict] = {}
-        cursor = "0"
-        seen_cursors = {cursor}
-        offset = 0
-        project_id = normalize_project_id(project_id) if project_id else ""
-        while True:
-            if project_id:
-                path = f"gizmos/{quote(project_id, safe='')}/conversations"
-                params: dict[str, Any] = {"cursor": cursor}
-            else:
-                path = "conversations"
-                params = {
-                    "offset": offset,
-                    "limit": self.config.page_size,
-                    "order": "updated",
-                    "is_archived": str(archived).lower(),
-                }
-            payload = self.json(path, token, params=params, label="conversation listing")
-            items = self.items(payload, "items", "conversations")
-            new = 0
-            for item in items:
-                ident = item.get("id") or item.get("conversation_id")
-                if not isinstance(ident, str) or not ident:
-                    raise ExportError("Conversation listing has an item without an ID")
-                new += ident not in output
-                item = dict(item, id=ident)
-                if folder_name:
-                    item["_folder_name"] = folder_name
-                    item["_project_id"] = project_id
-                output[ident] = item
-            if project_id:
-                if items and not new:
-                    raise ExportError("Project pagination repeated a page")
-                if payload.get("has_more") is False:
-                    break
+        label = (
+            "Project conversations"
+            if project_id
+            else "Archived conversations"
+            if archived
+            else "Regular conversations"
+        )
+        with self.progress.stage(label, transient=bool(project_id)) as work:
+            output: dict[str, dict] = {}
+            cursor = "0"
+            seen_cursors = {cursor}
+            offset = 0
+            page_number = 0
+            project_id = normalize_project_id(project_id) if project_id else ""
+            while True:
+                page_number += 1
+                if project_id:
+                    path = f"gizmos/{quote(project_id, safe='')}/conversations"
+                    params: dict[str, Any] = {"cursor": cursor}
+                else:
+                    path = "conversations"
+                    params = {
+                        "offset": offset,
+                        "limit": self.config.page_size,
+                        "order": "updated",
+                        "is_archived": str(archived).lower(),
+                    }
+                payload = self.json(path, token, params=params, label="conversation listing")
+                items = self.items(payload, "items", "conversations")
+                new = 0
+                for item in items:
+                    ident = item.get("id") or item.get("conversation_id")
+                    if not isinstance(ident, str) or not ident:
+                        raise ExportError("Conversation listing has an item without an ID")
+                    new += ident not in output
+                    item = dict(item, id=ident)
+                    if folder_name:
+                        item["_folder_name"] = folder_name
+                        item["_project_id"] = project_id
+                    output[ident] = item
+                reported_total = payload.get("total")
+                work.update(
+                    completed=len(output) if project_id else offset + len(items),
+                    total=reported_total
+                    if isinstance(reported_total, int) and reported_total >= 0
+                    else None,
+                    detail=f"page {page_number}; {len(items)} on page; {len(output)} unique conversations",
+                )
+                if project_id:
+                    if items and not new:
+                        raise ExportError("Project pagination repeated a page")
+                    if payload.get("has_more") is False:
+                        break
+                    next_cursor = payload.get("cursor") or payload.get("next_cursor")
+                    if not next_cursor:
+                        if payload.get("has_more"):
+                            raise ExportError("Project pagination has_more without a cursor")
+                        break
+                    if not isinstance(next_cursor, str) or next_cursor in seen_cursors or not items:
+                        raise ExportError("Project pagination did not advance")
+                    seen_cursors.add(next_cursor)
+                    cursor = next_cursor
+                else:
+                    offset += len(items)
+                    total = payload.get("total")
+                    if not items:
+                        if payload.get("has_more") or (isinstance(total, int) and offset < total):
+                            raise ExportError(
+                                "Conversation listing ended before its reported total"
+                            )
+                        break
+                    if not new:
+                        raise ExportError("Conversation pagination repeated a page")
+                    if payload.get("has_more") is False:
+                        if isinstance(total, int) and offset < total:
+                            raise ExportError(
+                                "Conversation listing ended before its reported total"
+                            )
+                        break
+                    if isinstance(total, int) and offset >= total and not payload.get("has_more"):
+                        break
+                    # Without a total, keep going to an empty page. A short page is not proof of completion.
+            work.finish(f"{page_number} pages; {len(output)} unique conversations")
+            return list(output.values())
+
+    def projects(self, token: str) -> dict[str, str]:
+        with self.progress.stage("Project discovery") as work:
+            projects: dict[str, str] = {}
+            cursor = None
+            seen = set()
+            page_number = 0
+            while True:
+                page_number += 1
+                params = {"owned_only": "false", "conversations_per_gizmo": "0"}
+                if cursor:
+                    params["cursor"] = cursor
+                payload = self.json(
+                    "gizmos/snorlax/sidebar",
+                    token,
+                    params=params,
+                    label="project discovery (set CHATGPT_AUTO_PROJECTS=false to opt out)",
+                )
+                items = self.items(payload, "items", "gizmos")
+                for item in items:
+                    gizmo = item
+                    for _ in range(3):
+                        if not isinstance(gizmo.get("gizmo"), dict):
+                            break
+                        gizmo = gizmo["gizmo"]
+                    ident = gizmo.get("id")
+                    if not isinstance(ident, str) or not ident:
+                        raise ExportError("Project discovery changed shape: item has no gizmo ID")
+                    if ident.startswith("g-p-"):
+                        display = gizmo.get("display") or {}
+                        if not isinstance(display, dict):
+                            raise ExportError(
+                                "Project discovery changed shape: display is not an object"
+                            )
+                        name = display.get("name") or gizmo.get("name") or ident
+                        projects[normalize_project_id(ident)] = str(name)
+                work.update(
+                    completed=len(projects),
+                    detail=f"page {page_number}; {len(projects)} projects discovered",
+                )
                 next_cursor = payload.get("cursor") or payload.get("next_cursor")
                 if not next_cursor:
                     if payload.get("has_more"):
-                        raise ExportError("Project pagination has_more without a cursor")
+                        raise ExportError("Project discovery has_more without a cursor")
                     break
-                if not isinstance(next_cursor, str) or next_cursor in seen_cursors or not items:
-                    raise ExportError("Project pagination did not advance")
-                seen_cursors.add(next_cursor)
+                if not isinstance(next_cursor, str) or next_cursor in seen or not items:
+                    raise ExportError("Project discovery pagination did not advance")
+                seen.add(next_cursor)
                 cursor = next_cursor
-            else:
-                offset += len(items)
-                total = payload.get("total")
-                if not items:
-                    if payload.get("has_more") or (isinstance(total, int) and offset < total):
-                        raise ExportError("Conversation listing ended before its reported total")
-                    break
-                if not new:
-                    raise ExportError("Conversation pagination repeated a page")
-                if payload.get("has_more") is False:
-                    if isinstance(total, int) and offset < total:
-                        raise ExportError("Conversation listing ended before its reported total")
-                    break
-                if isinstance(total, int) and offset >= total and not payload.get("has_more"):
-                    break
-                # Without a total, keep going to an empty page. A short page is not proof of completion.
-        return list(output.values())
-
-    def projects(self, token: str) -> dict[str, str]:
-        projects: dict[str, str] = {}
-        cursor = None
-        seen = set()
-        while True:
-            params = {"owned_only": "false", "conversations_per_gizmo": "0"}
-            if cursor:
-                params["cursor"] = cursor
-            payload = self.json(
-                "gizmos/snorlax/sidebar",
-                token,
-                params=params,
-                label="project discovery (set CHATGPT_AUTO_PROJECTS=false to opt out)",
+            projects.update(self.config.projects)
+            work.update(completed=len(projects))
+            work.finish(
+                f"{page_number} pages; {len(projects)} projects; {len(self.config.projects)} manual entries"
             )
-            items = self.items(payload, "items", "gizmos")
-            for item in items:
-                gizmo = item
-                for _ in range(3):
-                    if not isinstance(gizmo.get("gizmo"), dict):
-                        break
-                    gizmo = gizmo["gizmo"]
-                ident = gizmo.get("id")
-                if not isinstance(ident, str) or not ident:
-                    raise ExportError("Project discovery changed shape: item has no gizmo ID")
-                if ident.startswith("g-p-"):
-                    display = gizmo.get("display") or {}
-                    if not isinstance(display, dict):
-                        raise ExportError(
-                            "Project discovery changed shape: display is not an object"
-                        )
-                    name = display.get("name") or gizmo.get("name") or ident
-                    projects[normalize_project_id(ident)] = str(name)
-            next_cursor = payload.get("cursor") or payload.get("next_cursor")
-            if not next_cursor:
-                if payload.get("has_more"):
-                    raise ExportError("Project discovery has_more without a cursor")
-                break
-            if not isinstance(next_cursor, str) or next_cursor in seen or not items:
-                raise ExportError("Project discovery pagination did not advance")
-            seen.add(next_cursor)
-            cursor = next_cursor
-        projects.update(self.config.projects)
-        return projects
+            return projects
 
     def all_conversations(self, token: str) -> list[dict]:
-        output = {item["id"]: item for item in self.conversations(token)}
-        if self.config.include_archived:
-            output.update({item["id"]: item for item in self.conversations(token, archived=True)})
-        projects = self.projects(token) if self.config.auto_projects else dict(self.config.projects)
-        for ident, name in projects.items():
-            output.update({item["id"]: item for item in self.conversations(token, ident, name)})
-        return list(output.values())
+        with self.progress.stage("Conversation discovery") as discovery:
+            regular = self.conversations(token)
+            output = {item["id"]: item for item in regular}
+            self.progress.notice(f"Regular listing: {len(output)} unique conversations")
+            if self.config.include_archived:
+                archived = self.conversations(token, archived=True)
+                before = len(output)
+                output.update({item["id"]: item for item in archived})
+                self.progress.notice(
+                    f"Archived listing: {len(archived)} listed; {len(output) - before} additional unique"
+                )
+            projects = (
+                self.projects(token) if self.config.auto_projects else dict(self.config.projects)
+            )
+            self.progress.notice(
+                f"Project scope: {len(projects)} projects; automatic discovery {'enabled' if self.config.auto_projects else 'disabled'}"
+            )
+            with self.progress.stage("Project conversation listings", total=len(projects)) as work:
+                for i, (ident, name) in enumerate(projects.items(), 1):
+                    work.update(
+                        detail=f"project {i}/{len(projects)}; {len(output)} unique conversations so far"
+                    )
+                    items = self.conversations(token, ident, name)
+                    before = len(output)
+                    output.update({item["id"]: item for item in items})
+                    work.advance(
+                        detail=f"project {i}: {len(items)} listed; {len(output) - before} additional unique; {len(output)} total"
+                    )
+            discovery.update(completed=len(output))
+            discovery.finish(
+                f"{len(output)} unique conversations across regular/archived/project listings"
+            )
+            return list(output.values())
 
     def detail(self, ident: str, token: str) -> dict:
         return self.json(
@@ -297,28 +397,33 @@ class ChatGPTClient:
             "token_source": "configured_bearer" if self.config.access_token else "session_exchange",
             "endpoints": {},
         }
-        for path, params in (
-            ("conversations", {"offset": 0, "limit": 1, "order": "updated"}),
-            ("gizmos/snorlax/sidebar", {"conversations_per_gizmo": 0}),
-            ("settings/user", None),
-        ):
-            try:
-                data = self.json(path, token, params=params, label=path)
-                report["endpoints"][path] = {
-                    "status": 200,
-                    "keys": sorted(data),
-                    "items_on_page": len(data.get("items", []))
-                    if isinstance(data.get("items"), list)
-                    else None,
-                }
-            except HTTPError as exc:
-                report["endpoints"][path] = {
-                    "status": exc.status,
-                    "browser_challenge": exc.browser_challenge,
-                    "error": str(exc),
-                }
-            except ExportError as exc:
-                report["endpoints"][path] = {"error": str(exc)}
+        with self.progress.stage("Probe endpoints", total=3) as work:
+            for path, params in (
+                ("conversations", {"offset": 0, "limit": 1, "order": "updated"}),
+                ("gizmos/snorlax/sidebar", {"conversations_per_gizmo": 0}),
+                ("settings/user", None),
+            ):
+                try:
+                    data = self.json(path, token, params=params, label=path)
+                    report["endpoints"][path] = {
+                        "status": 200,
+                        "keys": sorted(data),
+                        "items_on_page": len(data.get("items", []))
+                        if isinstance(data.get("items"), list)
+                        else None,
+                    }
+                except HTTPError as exc:
+                    report["endpoints"][path] = {
+                        "status": exc.status,
+                        "browser_challenge": exc.browser_challenge,
+                        "error": str(exc),
+                    }
+                except ExportError as exc:
+                    report["endpoints"][path] = {"error": str(exc)}
+                item = report["endpoints"][path]
+                work.advance(
+                    detail=f"{path}: HTTP {item.get('status', 'unknown')}; {'failed' if 'error' in item else 'ok'}"
+                )
         if any(
             item.get("status") == 200 and "error" not in item
             for item in report["endpoints"].values()

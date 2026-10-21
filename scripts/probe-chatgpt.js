@@ -83,6 +83,8 @@
       "# Build index.html and .chatgpt-index/chats/ automatically after export/import.",
       "# Set false (or pass --no-index) to disable automatic HTML generation.",
       'CHATGPT_BUILD_INDEX = "true"',
+      "# CLI progress is enabled by default: live terminal bars or timestamped redirected logs.",
+      '# CHATGPT_PROGRESS = "true"  # Or pass --no-progress; results/errors are not suppressed.',
       "# Rebuild without exporting or authenticating: mise run index",
       "# Index another existing directory: mise run index -- /path/to/previous/export",
       "",

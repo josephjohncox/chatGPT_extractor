@@ -130,6 +130,7 @@ All of these can go under `[env]` in `mise.local.toml`:
 | `CHATGPT_INCLUDE_ARCHIVED` | `false` | Also query the regular archived-conversation listing |
 | `CHATGPT_OUTPUT_DIR` | `chatgpt_export` | Export/import destination and default offline-index directory; supports `~` |
 | `CHATGPT_BUILD_INDEX` | `true` | Automatically build HTML after export/import; `--no-index` also disables it |
+| `CHATGPT_PROGRESS` | `true` | Rich terminal progress or timestamped redirected logs on stderr; `--no-progress` disables it |
 | `CHATGPT_EXPORT_FORMAT` | `json` | `json` or `markdown` |
 | `CHATGPT_PAGE_SIZE` | `100` | Regular listing page size, 1–100 |
 | `CHATGPT_REQUEST_DELAY` | `1` | Minimum seconds between requests |
@@ -144,6 +145,27 @@ CHATGPT_PROJECTS = '[["g-p-0123456789abcdef0123456789abcdef", "Research"]]'
 ```
 
 Disabling automatic discovery exports only the regular listing and explicitly configured projects. It is an explicit scope reduction, not a fallback that silently claims all projects were exported.
+
+## Progress and run status
+
+Progress is enabled by default for `export`, `import`, `index`, and `probe`. Terminals show live stage bars/spinners, counts, elapsed time, and ETA when a total is known; wider terminals also show percentages and item rates. Redirected stderr receives timestamped stage updates instead of terminal control codes. Progress goes to **stderr**, so the probe's stdout remains valid JSON.
+
+Reporting covers authentication, regular/archived pages, project-discovery pages, per-project conversation listings, deduplicated totals, saved/skipped/failed/pending conversations, bytes written, HTTP attempts/status/response sizes, pacing/backoff, each auxiliary endpoint, directory scans, chat-page rendering, and catalog writing. Unknown cursor/scan totals stay indeterminate rather than showing a made-up percentage. ETAs are estimates.
+
+```sh
+# Conversations, optional snapshots, then local HTML; all stages report progress.
+mise run export -- --auxiliary
+
+# Preserve the JSON result while retaining human-readable progress:
+mise run probe > probe-result.json
+
+# Suppress progress only; final results and errors remain:
+mise run export -- --auxiliary --no-progress
+```
+
+You can also set `CHATGPT_PROGRESS = "false"` under the existing `[env]` in private `mise.local.toml`. Chat titles, project names/IDs, credentials, and response bodies are not included in progress. Auxiliary progress counts **endpoint snapshots**, not individual memories or proof of a complete account backup.
+
+On Ctrl+C, the terminal is restored, saved conversation checkpoints remain, and the CLI exits 130. Auxiliary availability is checkpointed throughout the run with explicit saved/unavailable/failed/interrupted/not-attempted outcomes. Optional unavailable endpoints may coexist with exit status 0; inspect `auxiliary-status.json` even when the command finishes. See [progress details](docs/progress.md).
 
 ## Output and incremental behavior
 
@@ -186,7 +208,7 @@ New exports/imports build the HTML automatically. Disable that with `CHATGPT_BUI
 
 ## Development
 
-`export_config.py` validates environment configuration; `chatgpt_client.py` owns read-only transport, authentication, retries, and pagination; `chatgpt_exporter.py` owns offline import and the CLI. `conversation_format.py` shares pure rendering between exports and the viewer; `export_io.py` owns atomic private output; `local_index.py` scans archives and builds pages using `templates/index.html` and `templates/conversation.html`. `main.py` delegates to that CLI. Tests disable real network access and clear inherited ChatGPT credentials. CI runs only offline gates and needs no ChatGPT secrets.
+`export_config.py` validates environment configuration; `chatgpt_client.py` owns read-only transport, authentication, retries, and pagination; `chatgpt_exporter.py` owns offline import and the CLI. `conversation_format.py` shares pure rendering between exports and the viewer; `export_io.py` owns atomic private output; `local_index.py` scans archives and builds pages using `templates/index.html` and `templates/conversation.html`. `main.py` delegates to that CLI. `progress_report.py` owns shared progress rendering and stream separation. Tests disable real network access and clear inherited ChatGPT credentials. CI runs only offline gates and needs no ChatGPT secrets.
 
 ## License
 
