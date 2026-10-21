@@ -59,6 +59,25 @@ def test_auth_exchanges_split_cookie_but_never_logs_it(capsys):
     assert instance.headers("fake-access-secret")["ChatGPT-Account-ID"] == "account-1"
 
 
+def test_session_cloudflare_challenge_is_explicit_and_body_stays_private(capsys):
+    transport = Transport(
+        response(
+            status=403,
+            headers={"cf-mitigated": "challenge", "Content-Type": "text/html"},
+            raw=b"<html>fake-cookie-secret and fake-access-secret</html>",
+        )
+    )
+    instance = client(transport, session_token_0="fake-part0", session_token_1="fake-part1")
+    with pytest.raises(HTTPError, match="Cloudflare browser challenge") as exc:
+        instance.access_token()
+    message = str(exc.value)
+    assert "scripts/probe-chatgpt.js" in message
+    assert "CHATGPT_ACCESS_TOKEN" in message
+    assert "not a verdict" in message
+    assert "fake-cookie-secret" not in message and "fake-access-secret" not in message
+    assert capsys.readouterr().out == ""
+
+
 def test_access_token_does_not_exchange_session():
     transport = Transport()
     assert client(transport, access_token="fake-access").access_token() == "fake-access"
@@ -69,6 +88,48 @@ def test_access_token_does_not_exchange_session():
 def test_missing_access_token(payload):
     with pytest.raises(ExportError, match="no accessToken"):
         client(Transport(response(payload)), session_token="fake").access_token()
+
+
+@pytest.mark.parametrize("status", [200, 403, 429])
+def test_explicit_challenge_header_is_not_treated_as_token_or_json_success(status):
+    instance = client(
+        Transport(
+            response(
+                {"accessToken": "fake-access-secret"},
+                status=status,
+                headers={"CF-Mitigated": "challenge"},
+            )
+        )
+    )
+    with pytest.raises(HTTPError, match="Cloudflare browser challenge") as exc:
+        instance.json("conversations", "fake-access", label="conversation listing")
+    assert exc.value.browser_challenge
+    assert "backend request is browser-gated" in str(exc.value)
+    assert "fake-access-secret" not in str(exc.value)
+
+
+def test_cloudflare_server_header_alone_is_not_proof_of_challenge():
+    instance = client(
+        Transport(
+            response(status=403, headers={"Server": "cloudflare"}, raw=b"<html>private</html>")
+        )
+    )
+    with pytest.raises(HTTPError) as exc:
+        instance.json("conversations", "fake-access", label="conversation listing")
+    assert not exc.value.browser_challenge
+    assert "challenge detected" not in str(exc.value)
+
+
+def test_explicit_429_challenge_is_not_retried_as_rate_limiting(monkeypatch):
+    monkeypatch.setattr(
+        "chatgpt_client.time.sleep",
+        lambda _: pytest.fail("A browser challenge must not be retried"),
+    )
+    transport = Transport(response(status=429, headers={"cf-mitigated": "challenge"}))
+    instance = ChatGPTClient(replace(Config(), request_delay=0, max_retries=3), transport)
+    with pytest.raises(HTTPError, match="Cloudflare browser challenge"):
+        instance.json("conversations", "fake-access", label="conversation listing")
+    assert len(transport.calls) == 1
 
 
 def test_missing_credentials_fails_before_network():
@@ -231,6 +292,19 @@ def test_all_conversations_deduplicates_and_preserves_project_tag(monkeypatch):
     assert set(result) == {"same", "normal", "archived"}
     assert result["same"]["_folder_name"] == "Research"
     assert calls == [("", False), ("", True), ("g-p-abc", False)]
+
+
+def test_bearer_probe_does_not_claim_verified_auth_when_backend_is_challenged():
+    transport = Transport(
+        *(response(status=403, headers={"cf-mitigated": "challenge"}) for _ in range(3))
+    )
+    report = client(transport, access_token="fake-configured-bearer").probe()
+    assert report["authentication"] == "unverified"
+    assert report["token_source"] == "configured_bearer"
+    assert all(
+        item["status"] == 403 and item["browser_challenge"] for item in report["endpoints"].values()
+    )
+    assert "fake-configured-bearer" not in json.dumps(report)
 
 
 def test_probe_prints_no_payload_values():

@@ -37,7 +37,9 @@ These sources are implementation leads, not guarantees or live evidence for this
 2. `mise run probe` used the existing locally embedded cookies after migration into `mise.local.toml`. `/api/auth/session` returned **HTTP 403**. The tool stopped before querying conversation content. Response bodies and token values were not logged.
 3. A one-off Playwright check launched installed Google Chrome in a new isolated, headless context with those same cookies. `GET https://chatgpt.com/` returned **403**, the page title was **“Just a moment…”**, and an in-page request to `/api/auth/session` also returned **403** with no usable access token. The browser context was closed; no browser profile was scraped or changed.
 
-The HTTP result alone cannot distinguish expired credentials from access restrictions or browser/Cloudflare gating. The Chrome challenge confirms gating in that isolated context, not that the user's normal browser is blocked. No authenticated UI, project listing, conversation-detail response, or full live export has been validated. No content was generated, changed, or deleted in ChatGPT, and no bulk download was started.
+A subsequent session-only repro returned 403 twice. A credential-safe inspection confirmed that the selected request uses both `.0` and `.1` cookies, no single-cookie override, and no workspace header. The response carries **`cf-mitigated: challenge`** and HTML content rather than JSON. This positively identifies a Cloudflare browser challenge on the Python session request; it does not determine whether the cookie values would be accepted after that challenge. The CLI now detects this explicit header without printing response bodies, and the browser helper reports a `browser_challenge` flag plus token-presence status.
+
+An unclassified HTTP 403 alone cannot distinguish expired credentials from access restrictions or browser gating. The isolated Chrome result does not prove the user's normal browser is blocked. No authenticated UI, project listing, conversation-detail response, or full live export has been validated. No content was generated, changed, or deleted in ChatGPT, and no bulk download was started.
 
 ## Local verification
 
@@ -49,4 +51,4 @@ Run `scripts/probe-chatgpt.js` in DevTools on the user's normal signed-in `https
 
 If a fresh web bearer token works outside the browser, store it only in `mise.local.toml`, rerun `mise run probe`, then perform a deliberately scoped export to a separate ignored output directory. If browser gating persists, use a downloaded official export where available; a browser-side export adapter remains future work. Refreshing tokens or adding speculative headers is not proof of compatibility.
 
-**Confidence:** high in the recorded 403/challenge observations and offline behavior covered by tests; provisional in web endpoint compatibility until an authenticated live probe and scoped export pass.
+**Confidence:** high that the observed Python session request is receiving an explicit Cloudflare browser challenge, and in the offline behavior covered by tests. Cookie validity beyond that challenge and authenticated backend compatibility remain unverified. A corrected error classification is not a fix for live browser gating.

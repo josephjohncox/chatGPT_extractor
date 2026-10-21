@@ -108,7 +108,7 @@ To request a supported ChatGPT export, open **Settings → Data controls → Exp
 
 ### If the HTTP probe gets 403
 
-403 can mean invalid credentials, a workspace/access restriction, or browser/Cloudflare gating. Refreshing a token is not guaranteed to fix it. The tool does not try to solve or bypass challenges.
+403 can mean invalid credentials, a workspace/access restriction, or browser/Cloudflare gating. If the response includes `cf-mitigated: challenge`, the CLI identifies a **Cloudflare browser challenge** explicitly; this does not establish that your cookie values are wrong. Refreshing a token is not guaranteed to fix it. The tool does not try to solve or bypass challenges. See the [challenge diagnosis steps](docs/authentication.md#if-the-cli-detects-a-cloudflare-browser-challenge). A bearer token from the helper skips the cookie-exchange request, but backend requests may still be challenged.
 
 For a check from your real signed-in browser, paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on `https://chatgpt.com`. It makes read-only requests using the browser session and returns status codes, field names, types, and counts, not token values or conversation bodies. It prompts for the optional workspace account ID and, afterward, offers a private credential-file download as described above. Inspect the small report before sharing it; never share the downloaded TOML. This is a diagnostic, not a conversation exporter.
 

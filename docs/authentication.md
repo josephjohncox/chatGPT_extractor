@@ -112,7 +112,7 @@ mise trust mise.local.toml
 mise run probe
 ```
 
-The probe makes read-only requests; it does not start a bulk export. Successful authentication reports `"authentication": "ok"`, followed by endpoint statuses and field names. Check the conversation-listing result as well as authentication. An unavailable endpoint can make the command exit nonzero even when authentication succeeds.
+The probe makes read-only requests; it does not start a bulk export. The CLI reports `"authentication": "ok"` once a backend endpoint responds successfully. Check the conversation-listing result as well: success on another endpoint is not proof that conversations are accessible. `token_source` shows `configured_bearer` or `session_exchange` without exposing the token. A bearer token with no successful backend response remains `unverified`; a completed cookie exchange without backend success is `session_ok_backend_unverified`. An unavailable endpoint can make the command exit nonzero even when another endpoint succeeds.
 
 Do not paste a token, full session response, cookie-table screenshot, credential file, or raw network capture into an issue or chat. The helper's redacted diagnostic report is separate from the downloaded credential file.
 
@@ -154,5 +154,16 @@ Replace `accessToken-field-value` with the actual value, save the file, and run 
 - **An old bearer token still takes precedence:** clear `CHATGPT_ACCESS_TOKEN` before testing cookies. If a single-cookie value remains, clear it before testing split cookies.
 - **HTTP 401 or expired credentials:** sign in again if necessary, then replace all values for the chosen method from the same current browser session. There is no fixed lifetime assumed by the exporter.
 - **HTTP 403 or “Just a moment…”:** this can be browser/Cloudflare gating, a workspace/access restriction, or rejected credentials. It does not by itself prove expiry. Check sign-in and the account header; use the helper from the normal signed-in tab for a browser-side diagnostic. A fresh token is not a guaranteed fix.
+
+### If the CLI detects a Cloudflare browser challenge
+
+The CLI reports this only when the server sends `cf-mitigated: challenge`, Cloudflare's [documented challenge-page indicator](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/). It is a browser-challenge response, not a verdict that the split cookie values are invalid. Correct cookie names and values alone may not let a standalone Python request complete the browser challenge.
+
+1. Run `scripts/probe-chatgpt.js` in your normal signed-in ChatGPT tab, as described above.
+2. Check the redacted report. The authentication fields include `status`, `browser_challenge`, and `has_access_token`; backend entries also include `browser_challenge`.
+3. If the browser receives a token, accept the credential-file download and copy its `CHATGPT_ACCESS_TOKEN` into the existing private file. This changes the CLI to bearer mode and skips `/api/auth/session`; it does not prove the backend is accessible from Python.
+4. Run `mise run probe` again. Confirm `token_source` is `configured_bearer`. If the backend requests also report a browser challenge, the HTTP-only CLI is still blocked. Recopying session cookies is not an established fix. A browser-context export adapter would be required for that path; this repository does not yet provide one.
+
+Share only the inspected, redacted report if further diagnosis is needed, never the downloaded TOML or session response. No challenge solver, speculative browser impersonation, or automatic fallback is applied.
 
 You can still browse previous exports with `mise run index` or import a downloaded archive without web authentication.

@@ -34,6 +34,7 @@ const context = {
     return {
       ok: status === 200,
       status,
+      headers: { get: name => name.toLowerCase() === 'cf-mitigated' && options.challenge ? 'challenge' : null },
       json: async () => session ? { accessToken: options.token } : { items: [] },
     };
   },
@@ -139,6 +140,17 @@ def test_no_credential_download_without_successful_session(options):
     assert result["downloads"] == []
     assert result["confirmations"] == 0
     assert result["requests"] == ["/api/auth/session"]
+
+
+def test_browser_probe_reports_challenge_without_tokens_or_download():
+    result, options = probe(status=403, challenge=True)
+    assert result["report"]["authentication"] == {
+        "status": 403,
+        "browser_challenge": True,
+        "has_access_token": False,
+    }
+    assert result["downloads"] == []
+    assert options["token"] not in json.dumps(result["report"])
 
 
 def test_cancelling_workspace_prompt_never_downloads():

@@ -7,10 +7,16 @@
     throw new Error("Run this only on https://chatgpt.com");
   }
   const report = { authentication: null, endpoints: {} };
+  const browserChallenge = response => response.headers.get("cf-mitigated")?.trim().toLowerCase() === "challenge";
   const sessionResponse = await fetch("/api/auth/session", { credentials: "include" });
-  report.authentication = { status: sessionResponse.status };
   const session = await sessionResponse.json().catch(() => ({}));
-  if (!sessionResponse.ok || typeof session.accessToken !== "string" || !session.accessToken) {
+  const hasAccessToken = sessionResponse.ok && !browserChallenge(sessionResponse) && typeof session.accessToken === "string" && session.accessToken.length > 0;
+  report.authentication = {
+    status: sessionResponse.status,
+    browser_challenge: browserChallenge(sessionResponse),
+    has_access_token: hasAccessToken,
+  };
+  if (!hasAccessToken) {
     return report;
   }
   const workspace = prompt("ChatGPT-Account-ID for the workspace to check (blank for personal/default):", "");
@@ -36,7 +42,7 @@
     try {
       const response = await fetch(`/backend-api/${path}`, { headers, credentials: "include", redirect: "error" });
       const data = await response.json().catch(() => null);
-      report.endpoints[path] = { status: response.status, shape: shape(data) };
+      report.endpoints[path] = { status: response.status, browser_challenge: browserChallenge(response), shape: shape(data) };
     } catch {
       report.endpoints[path] = { error: "Request failed (details withheld)" };
     }

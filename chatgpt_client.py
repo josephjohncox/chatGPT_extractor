@@ -18,8 +18,25 @@ class ExportError(RuntimeError):
 
 
 class HTTPError(ExportError):
-    def __init__(self, status: int, label: str):
+    def __init__(self, status: int, label: str, *, browser_challenge: bool = False):
         self.status = status
+        self.browser_challenge = browser_challenge
+        if browser_challenge:
+            explanation = "Cloudflare browser challenge detected (cf-mitigated: challenge). This is not a verdict on cookie validity."
+            if label == "session authentication":
+                action = (
+                    " Run scripts/probe-chatgpt.js in your normal signed-in ChatGPT tab and use its "
+                    "CHATGPT_ACCESS_TOKEN to skip this cookie-exchange request. Retry mise run probe. "
+                    "Backend requests may still be challenged."
+                )
+            else:
+                action = (
+                    " This backend request is browser-gated even if a bearer token was supplied. "
+                    "Use scripts/probe-chatgpt.js in your normal signed-in tab for a browser-side comparison. "
+                    "Offline import/index remain available; bearer tokens do not solve browser challenges."
+                )
+            super().__init__(f"{label}: HTTP {status}. {explanation}{action}")
+            return
         hint = (
             " Check browser sign-in, credentials, and workspace ID. HTTP 403 can also be browser/Cloudflare gating; use offline import if needed."
             if status in {401, 403}
@@ -84,6 +101,8 @@ class ChatGPTClient:
                     ) from None
                 time.sleep(retry_delay(None, attempt))
                 continue
+            if response.headers.get("cf-mitigated", "").strip().lower() == "challenge":
+                return response
             if (
                 response.status_code not in {429, 500, 502, 503, 504}
                 or attempt == self.config.max_retries
@@ -102,8 +121,9 @@ class ChatGPTClient:
 
     @staticmethod
     def decode(response: requests.Response, label: str) -> dict:
-        if response.status_code != 200:
-            raise HTTPError(response.status_code, label)
+        browser_challenge = response.headers.get("cf-mitigated", "").strip().lower() == "challenge"
+        if response.status_code != 200 or browser_challenge:
+            raise HTTPError(response.status_code, label, browser_challenge=browser_challenge)
         try:
             payload = response.json()
         except ValueError:
@@ -271,7 +291,11 @@ class ChatGPTClient:
     def probe(self) -> dict:
         """Only request metadata endpoints; return no credentials or conversation content."""
         token = self.access_token()
-        report: dict[str, Any] = {"authentication": "ok", "endpoints": {}}
+        report: dict[str, Any] = {
+            "authentication": "unverified",
+            "token_source": "configured_bearer" if self.config.access_token else "session_exchange",
+            "endpoints": {},
+        }
         for path, params in (
             ("conversations", {"offset": 0, "limit": 1, "order": "updated"}),
             ("gizmos/snorlax/sidebar", {"conversations_per_gizmo": 0}),
@@ -286,6 +310,19 @@ class ChatGPTClient:
                     if isinstance(data.get("items"), list)
                     else None,
                 }
+            except HTTPError as exc:
+                report["endpoints"][path] = {
+                    "status": exc.status,
+                    "browser_challenge": exc.browser_challenge,
+                    "error": str(exc),
+                }
             except ExportError as exc:
                 report["endpoints"][path] = {"error": str(exc)}
+        if any(
+            item.get("status") == 200 and "error" not in item
+            for item in report["endpoints"].values()
+        ):
+            report["authentication"] = "ok"
+        elif not self.config.access_token:
+            report["authentication"] = "session_ok_backend_unverified"
         return report
