@@ -66,6 +66,50 @@ def assert_links_exist(page):
         assert (page.parent / unquote(href)).is_file(), href
 
 
+@pytest.mark.parametrize("renamed", [False, True])
+def test_newer_markdown_beats_older_json_using_verified_exact_checkpoint(tmp_path, renamed):
+    save(tmp_path, "Old/chat.json", detail(updated=1))
+    relative = "New/renamed.md" if renamed else "Old/chat.md"
+    markdown = tmp_path / relative
+    markdown.parent.mkdir(parents=True, exist_ok=True)
+    markdown.write_text(
+        "# Continued conversation\n\n**Last updated:** 1970-01-01 00:00 UTC\n\nNewest Markdown reply"
+    )
+    save(
+        tmp_path,
+        ".export-index.json",
+        {
+            "markdown:test-chat": {
+                "path": relative,
+                "update_time": 2,
+                "sha256": hashlib.sha256(markdown.read_bytes()).hexdigest(),
+            }
+        },
+    )
+    result = build_index(tmp_path)
+    assert result.chats == 1
+    page = next((tmp_path / SITE / "chats").glob("*.html")).read_text()
+    assert "Newest Markdown reply" in page and "Selected answer" not in page
+    assert "Continued conversation" in result.path.read_text()
+
+
+def test_unverified_markdown_checkpoint_is_not_a_version_authority(tmp_path):
+    save(tmp_path, "Old/chat.json", detail(updated=1))
+    markdown = tmp_path / "Old/chat.md"
+    markdown.write_text(
+        "# Older Markdown\n\n**Last updated:** 1970-01-01 00:00 UTC\n\nUntrusted version hint"
+    )
+    save(
+        tmp_path,
+        ".export-index.json",
+        {"markdown:other-chat": {"path": "Old/chat.md", "update_time": 9999999, "sha256": "wrong"}},
+    )
+    result = build_index(tmp_path)
+    assert result.chats == 1
+    page = next((tmp_path / SITE / "chats").glob("*.html")).read_text()
+    assert "Selected answer" in page and "Untrusted version hint" not in page
+
+
 def test_builds_existing_json_tree_without_network_or_changing_sources(tmp_path):
     source = save(tmp_path, "Old project/Original title.json", detail())
     digest = hashlib.sha256(source.read_bytes()).hexdigest()

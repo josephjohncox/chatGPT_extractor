@@ -9,6 +9,7 @@ import sys
 import time
 import zipfile
 from contextlib import nullcontext
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -252,6 +253,7 @@ def export_conversations(
                 try:
                     work.update(detail=f"fetching {position}/{len(unique)}; {summary()}")
                     detail = fetch_detail(ident)
+                    fetched_at = datetime.now(UTC).isoformat()
                     if not isinstance(detail, dict) or not detail:
                         raise ExportError("Conversation detail is empty or not an object")
                     detail_id = detail.get("id") or detail.get("conversation_id")
@@ -292,6 +294,9 @@ def export_conversations(
                     index[key] = {
                         "path": relative,
                         "update_time": updated,
+                        "detail_update_time": detail.get("update_time"),
+                        "current_node": detail.get("current_node"),
+                        "fetched_at": fetched_at,
                         "sha256": hashlib.sha256(content).hexdigest(),
                     }
                     write_json_file(index_path, index)

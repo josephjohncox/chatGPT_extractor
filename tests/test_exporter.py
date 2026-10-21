@@ -150,6 +150,35 @@ def test_duplicate_titles_id_stability_incremental_update_and_damage(tmp_path):
     assert set(calls) == {"a", "b", "c"}
 
 
+@pytest.mark.parametrize("output_format", ["json", "markdown"])
+def test_continued_conversation_refreshes_same_file_without_force(tmp_path, output_format):
+    config = replace(Config(), output_dir=tmp_path, output_format=output_format)
+    detail = conversation()
+    metadata = {"id": detail["id"], "title": detail["title"], "update_time": 1}
+    calls = []
+
+    def fetch(ident):
+        calls.append(ident)
+        return detail
+
+    assert export_conversations([metadata], fetch, config) == 0
+    detail["mapping"]["selected"]["children"] = ["followup"]
+    detail["mapping"]["followup"] = node("selected", ["latest"], "Follow-up question", role="user")
+    detail["mapping"]["latest"] = node("followup", [], "Latest reply after continuing")
+    detail["current_node"] = "latest"
+    detail["update_time"] = metadata["update_time"] = 2
+    assert export_conversations([metadata], fetch, config) == 0
+    extension = "json" if output_format == "json" else "md"
+    files = list((tmp_path / "_Uncategorized").glob(f"*.{extension}"))
+    assert len(files) == 1 and "Latest reply after continuing" in files[0].read_text()
+    assert calls == [detail["id"], detail["id"]]
+    entry = json.loads((tmp_path / ".export-index.json").read_text())[
+        f"{output_format}:{detail['id']}"
+    ]
+    assert entry["update_time"] == entry["detail_update_time"] == 2
+    assert entry["current_node"] == "latest" and "T" in entry["fetched_at"]
+
+
 def test_format_switch_preserves_raw_json(tmp_path):
     detail = conversation()
     config = replace(Config(), output_dir=tmp_path)

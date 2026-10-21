@@ -167,6 +167,28 @@ The local viewer adds raster previews, an attachment gallery, and inert file-vie
 
 Expired/deleted files, unsupported references, or incomplete Canvas reconstruction produce explicit manifest entries and a nonzero partial-export result. This is not a promise that every historical asset remains recoverable.
 
+## Keep continued conversations current
+
+Run the normal export again using the same output directory:
+
+```sh
+mise run export
+```
+
+A conversation is identified by its ID, not just its title. If its API `update_time` changes, the exporter fetches the full detail again and atomically replaces the current output file. It skips only when the timestamp, selected format/path, and local checksum still match. Missing timestamps or missing/damaged files cause another fetch. New replies and the selected `current_node` are included in the refreshed payload.
+
+Newly fetched entries in private `.export-index.json` record the listing timestamp, exact detail timestamp when returned, last detail-retrieval time (`fetched_at`, UTC), selected node, and checksum. Older unchanged checkpoints gain these audit fields on their next fetch. Skipping an unchanged file does not pretend it was downloaded again. Legacy files without a matching checkpoint are not trusted merely because a filename exists.
+
+To bypass the timestamp/cache decision:
+
+```sh
+mise run export -- --refresh
+```
+
+This also refreshes enabled attachments, so normal incremental export is preferable for routine updates. `mise run index` only rebuilds the webpage from local files; it does not fetch new messages. Mixed JSON/Markdown views prefer the newer saved version; exact Markdown timestamps/IDs from a checkpoint are used only after its file checksum matches.
+
+There is no atomic whole-account snapshot while chats are changing. A conversation continued after its detail was fetched needs another run. Export after a conversation finishes, and rerun if you used it during the export. Forced refresh removes reliance on unchanged listing timestamps, but still captures each conversation only as of its own request.
+
 ## Progress and run status
 
 Progress is enabled by default for `export`, `import`, `index`, and `probe`. Terminals show live stage bars/spinners, counts, elapsed time, and ETA when a total is known; wider terminals also show percentages and item rates. Redirected stderr receives timestamped stage updates instead of terminal control codes. Progress goes to **stderr**, so the probe's stdout remains valid JSON.

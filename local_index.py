@@ -40,6 +40,7 @@ class Chat:
     updated: float | None
     raw: list[Source] = field(default_factory=list)
     markdown: list[Path] = field(default_factory=list)
+    markdown_updates: dict[Path, float | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -106,6 +107,38 @@ def records(data: Any) -> list[tuple[dict, int | None]]:
     return []
 
 
+def markdown_version_hints(root: Path) -> tuple[dict[str, dict], list[str]]:
+    """Optional exact metadata; each Markdown file's SHA must match before it is used."""
+    path = root / ".export-index.json"
+    if not path.exists():
+        return {}, []
+    if path.is_symlink():
+        return {}, [
+            "Incremental checkpoint is a symlink; exact Markdown version hints were ignored"
+        ]
+    try:
+        data = read_json(path)
+        if not isinstance(data, dict):
+            raise ExportError("Invalid checkpoint")
+    except (OSError, ValueError, ExportError):
+        return {}, ["Incremental checkpoint could not be read; using source-file metadata"]
+    hints = {}
+    for key, entry in data.items():
+        if (
+            isinstance(key, str)
+            and key.startswith("markdown:")
+            and key.removeprefix("markdown:")
+            and isinstance(entry, dict)
+            and isinstance(entry.get("path"), str)
+            and isinstance(entry.get("sha256"), str)
+        ):
+            hints[entry["path"].replace("\\", "/")] = {
+                **entry,
+                "conversation_id": key.removeprefix("markdown:"),
+            }
+    return hints, []
+
+
 def scan_directory(
     root: Path, *, progress: ProgressReporter | None = None
 ) -> tuple[list[Chat], int, list[str]]:
@@ -114,7 +147,7 @@ def scan_directory(
     aliases: dict[Path, str] = {}
     markdown = []
     ignored = 0
-    warnings = []
+    version_hints, warnings = markdown_version_hints(root)
     report = progress if progress is not None else NO_PROGRESS
     source_number = 0
 
@@ -190,19 +223,36 @@ def scan_directory(
                     key = aliases.get(
                         relative.with_suffix(""), f"markdown:{relative.with_suffix('').as_posix()}"
                     )
+                    heading = re.search(r"(?m)^#\s+(.+?)\s*$", text)
+                    dates = dict(
+                        re.findall(r"(?m)^\*\*(Created|Last updated):\*\*\s*([^\r\n]+)", text)
+                    )
+                    created = timestamp(dates.get("Created"))
+                    updated = timestamp(dates.get("Last updated"))
+                    hint = version_hints.get(relative.as_posix())
+                    if hint and hashlib.sha256(path.read_bytes()).hexdigest() == hint["sha256"]:
+                        key = "id:" + hint["conversation_id"]
+                        precise = timestamp(hint.get("detail_update_time"))
+                        if precise is None:
+                            precise = timestamp(hint.get("update_time"))
+                        if precise is not None:
+                            updated = precise
                     if key not in chats:
-                        heading = re.search(r"(?m)^#\s+(.+?)\s*$", text)
-                        dates = dict(
-                            re.findall(r"(?m)^\*\*(Created|Last updated):\*\*\s*([^\r\n]+)", text)
-                        )
                         chats[key] = Chat(
                             key,
                             heading[1] if heading else fallback_title(path),
                             project_name(relative),
-                            timestamp(dates.get("Created")),
-                            timestamp(dates.get("Last updated")),
+                            created,
+                            updated,
                         )
-                    chats[key].markdown.append(path)
+                    chat = chats[key]
+                    if updated is not None and (chat.updated is None or updated > chat.updated):
+                        chat.title = heading[1] if heading else fallback_title(path)
+                        chat.project = project_name(relative)
+                        chat.created = created if created is not None else chat.created
+                        chat.updated = updated
+                    chat.markdown.append(path)
+                    chat.markdown_updates[path] = updated
                 except (OSError, ValueError, ExportError):
                     warnings.append(f"{relative}: unable to read conversation Markdown")
                 markdown_work.advance(detail=f"{len(chats)} chats; {len(warnings)} warnings")
@@ -245,8 +295,22 @@ def source_links(chat: Chat, directory: Path) -> str:
 
 
 def conversation_body(chat: Chat) -> str:
-    if not chat.raw:
-        return f'<pre class="markdown">{html.escape(read_text(chat.markdown[0]))}</pre>'
+    def markdown_time(path: Path) -> float:
+        value = chat.markdown_updates.get(path)
+        return value if value is not None else -math.inf
+
+    latest_markdown = max(chat.markdown, key=markdown_time, default=None)
+    markdown_updated = (
+        chat.markdown_updates.get(latest_markdown) if latest_markdown is not None else None
+    )
+    raw_updated = max(
+        (source.updated if source.updated is not None else -math.inf for source in chat.raw),
+        default=-math.inf,
+    )
+    if latest_markdown is not None and (
+        not chat.raw or (markdown_updated is not None and markdown_updated > raw_updated)
+    ):
+        return f'<pre class="markdown">{html.escape(read_text(latest_markdown))}</pre>'
     source = max(chat.raw, key=lambda item: item.updated if item.updated is not None else -math.inf)
     detail = read_json(source.path)
     if source.position is not None:
