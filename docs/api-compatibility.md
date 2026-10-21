@@ -29,7 +29,7 @@ Community evidence for project listing shapes and pagination:
 - [brianjlacy/export-chatgpt project API research](https://github.com/brianjlacy/export-chatgpt/blob/main/_docs/PROJECTS_FILES_RESEARCH.md): nested sidebar payload, cursor pagination, project conversation membership, workspace header, and file references.
 - [PZEHONG/ChatGPT-API protocol reference](https://github.com/PZEHONG/ChatGPT-API/blob/master/docs/protocol-reference.md): session exchange, regular conversation mapping, sidebar discovery, and `/settings/user`.
 
-These sources are implementation leads, not guarantees or live evidence for this account. File-download and message-sending endpoints described there were not implemented or exercised.
+These sources are implementation leads, not guarantees. File downloads are now implemented and scoped live checks succeeded for an uploaded raster image and a generated sandbox binary. Message-sending endpoints are neither implemented nor exercised.
 
 ## Actual live observations
 
@@ -55,13 +55,23 @@ The generic header was therefore a sufficient trigger in this comparison. It was
 
 After the correction, normal `mise run probe` returned 200 for conversations, project sidebar, and settings in configured-bearer mode. A separate probe with the bearer token removed in memory (without modifying the private file) completed split-cookie session exchange and returned 200 for the same three backend endpoints. Full sidebar cursor pagination also completed, and one conversation-detail request returned a mapping and current node. No bulk conversation export was started. One earlier project-listing trial was still challenged before subsequent successful checks; this is not a universal or permanent guarantee.
 
+## Attachment verification
+
+Attachment discovery was checked against existing raw exports without printing message bodies or identifiers. The observed formats include file-service/sediment pointers, rendered sediment fragments, uploaded-file metadata, sandbox paths, and Canvas create/update payloads. Unsupported references and ambiguous/unapplied Canvas updates remain explicit manifest outcomes, not assumed successes.
+
+A file resolver returned a relative `/api/library/files/...` path rather than the older estuary route. A controlled same-URL comparison on one library file returned **401 without session cookies, 200 with cookies, and 401 without cookies again**. A different image download also worked without cookies, so this is conditional on the content route/file, not a universal requirement. The transport forwards configured cookies only to approved ChatGPT content paths and never to external signed-storage sessions.
+
+One uploaded JPEG and one sandbox-generated binary were saved in ignored, private verification storage. A scoped end-to-end attachment-backfill command also succeeded using a reference-only local fixture; no account-wide binary export was launched. Native Chrome checks on synthetic local data verified raster preview, gallery links, and a malicious HTML artifact downloading through an inert Blob viewer without executing its script or making external requests. The raw-file download attribute alone was found unsafe under file:// and is not used as an execution boundary.
+
+See [attachment scope, transport policy, and Canvas limits](attachments.md). The locked certifi, urllib3, and idna dependencies were refreshed to patched versions while adding the binary-transfer path; this is separate from application-level URL/credential checks.
+
 ## Local verification
 
 `mise run check` runs Ruff, format checks, mypy, and offline tests. Tests cover credentials/configuration, both pagination schemes, repeated/broken pages, project discovery shapes, deduplication, active-branch rendering, timestamp variants, duplicate titles, checksum/update-aware reruns, safe/atomic private output, JSON/ZIP import, optional unavailable snapshots, and nonzero failure status. All test transports are controlled and actual network calls are forbidden. Passing these tests does not prove live endpoint compatibility.
 
 ## Remaining live gate
 
-Run `scripts/probe-chatgpt.js` in DevTools on the user's normal signed-in `https://chatgpt.com` tab. Its console report contains only statuses and response shapes. Supply the active workspace account ID if needed. After the checks, an explicit confirmation can download `mise.local.toml` containing the browser's bearer token, the supplied workspace ID, the browser's `navigator.userAgent` as `CHATGPT_USER_AGENT`, a prompted export output directory, and explicit `CHATGPT_BUILD_INDEX` / `CHATGPT_AUXILIARY` settings with usage comments; this credential file is separate from the redacted report and must stay private. Merge its six active keys into an existing local file, preserving other settings and intentional index-generation or auxiliary-snapshot preferences, then set permissions to 0600. Compare the project nesting/pagination fields with the adapter and add sanitized fixtures for any new shapes. Do not share tokens, cookies, session JSON, raw HAR files, or conversation bodies.
+Run `scripts/probe-chatgpt.js` in DevTools on the user's normal signed-in `https://chatgpt.com` tab. Its console report contains only statuses and response shapes. Supply the active workspace account ID if needed. After the checks, an explicit confirmation can download `mise.local.toml` containing the browser's bearer token, the supplied workspace ID, the browser's `navigator.userAgent` as `CHATGPT_USER_AGENT`, a prompted export output directory, and explicit `CHATGPT_BUILD_INDEX` / `CHATGPT_AUXILIARY` / `CHATGPT_ATTACHMENTS` settings with usage comments; this credential file is separate from the redacted report and must stay private. Merge its seven active keys into an existing local file, preserving other settings and intentional index-generation or auxiliary-snapshot preferences, then set permissions to 0600. Compare the project nesting/pagination fields with the adapter and add sanitized fixtures for any new shapes. Do not share tokens, cookies, session JSON, raw HAR files, or conversation bodies.
 
 Keep the configured User-Agent aligned with the signed-in browser, rerun `mise run probe`, then perform a deliberately scoped export to a separate ignored output directory before a full account export. If challenges persist, compare one request variable at a time; a separate browser-context adapter is not implemented and should not be assumed necessary from a challenge response alone. Refreshing tokens without isolating the request difference is not proof of a fix.
 

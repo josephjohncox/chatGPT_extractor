@@ -69,6 +69,8 @@ class Config:
     build_index: bool = True
     progress: bool = True
     auxiliary: bool = True
+    attachments: bool = True
+    max_attachment_bytes: int = 512 * 1024 * 1024
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
@@ -104,6 +106,9 @@ class Config:
             raise ConfigError(
                 "CHATGPT_PAGE_SIZE must be 1..100 and CHATGPT_MAX_RETRIES 0..10 (integers)"
             )
+        max_attachment_bytes = number(env, "CHATGPT_MAX_ATTACHMENT_BYTES", 512 * 1024 * 1024, 1)
+        if not max_attachment_bytes.is_integer() or max_attachment_bytes > 2**31:
+            raise ConfigError("CHATGPT_MAX_ATTACHMENT_BYTES must be an integer in 1..2147483648")
         secrets = {}
         for name in ("SESSION_TOKEN", "SESSION_TOKEN_0", "SESSION_TOKEN_1", "ACCESS_TOKEN"):
             value = env.get(f"CHATGPT_{name}", "").strip()
@@ -142,6 +147,8 @@ class Config:
             build_index=boolean(env, "CHATGPT_BUILD_INDEX", True),
             progress=boolean(env, "CHATGPT_PROGRESS", True),
             auxiliary=boolean(env, "CHATGPT_AUXILIARY", True),
+            attachments=boolean(env, "CHATGPT_ATTACHMENTS", True),
+            max_attachment_bytes=int(max_attachment_bytes),
         )
 
     def cookie(self) -> str:

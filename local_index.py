@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from attachment_view import attachment_entries, prepare_asset_views, render_attachments
 from chatgpt_client import ExportError
 from conversation_format import extract_messages, parse_timestamp
 from export_io import decode_json, write_text_file
@@ -294,6 +295,9 @@ def build_index(directory: Path, *, progress: ProgressReporter | None = None) ->
         site.chmod(0o700)
         write_text_file(ownership, MARKER)
     chats, ignored, warnings = scan_directory(root, progress=report)
+    asset_entries, asset_warnings = attachment_entries(root)
+    warnings.extend(asset_warnings)
+    prepare_asset_views(asset_entries, root, site, progress=report)
     rows = []
     projects: dict[str, int] = {}
     try:
@@ -321,6 +325,18 @@ def build_index(directory: Path, *, progress: ProgressReporter | None = None) ->
                             "CREATED": html.escape(parse_timestamp(chat.created)),
                             "UPDATED": html.escape(parse_timestamp(chat.updated)),
                             "CONTENT": body,
+                            "ASSETS": render_attachments(
+                                asset_entries,
+                                root,
+                                pages,
+                                conversation_id=chat.key.removeprefix("id:")
+                                if chat.key.startswith("id:")
+                                else "",
+                                source_paths=[
+                                    str(source.path.relative_to(root)) for source in chat.raw
+                                ]
+                                + [str(path.relative_to(root)) for path in chat.markdown],
+                            ),
                             "SOURCES": source_links(chat, pages),
                         },
                     ),
@@ -358,6 +374,24 @@ def build_index(directory: Path, *, progress: ProgressReporter | None = None) ->
             if warnings
             else ""
         )
+        if asset_entries:
+            gallery = site / "assets.html"
+            if gallery.is_symlink() or not gallery.resolve().is_relative_to(root):
+                raise ExportError("Attachment gallery path escapes the output directory")
+            with report.stage("Build attachment gallery", total=1) as asset_work:
+                write_text_file(
+                    gallery,
+                    render_template(
+                        "assets.html",
+                        {
+                            "MARKER": MARKER,
+                            "DIRECTORY": html.escape(root.name),
+                            "COUNT": str(len(asset_entries)),
+                            "ASSET_ITEMS": render_attachments(asset_entries, root, site),
+                        },
+                    ),
+                )
+                asset_work.advance(detail=f"{len(asset_entries)} attachment references")
         with report.stage("Write HTML catalog", total=1) as catalog_work:
             write_text_file(
                 index,
@@ -370,6 +404,9 @@ def build_index(directory: Path, *, progress: ProgressReporter | None = None) ->
                         "PROJECT_COUNT": str(len(projects)),
                         "BUILT_AT": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
                         "ROWS": "\n".join(rows),
+                        "ASSETS_LINK": f'<p><a href="./.chatgpt-index/assets.html">Attachments &amp; artifacts ({len(asset_entries)})</a></p>'
+                        if asset_entries
+                        else "",
                         "OPTIONS": options,
                         "PROJECT_BUTTONS": buttons,
                         "WARNINGS": warning_html,

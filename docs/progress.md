@@ -25,6 +25,7 @@ Unknown totals remain indeterminate: a cursor-based listing and a directory scan
 | Project discovery | Sidebar pages, discovered project counts, and manual-entry counts |
 | Project listings | Project ordinal/count, per-project pages and conversation counts, and additional unique conversations |
 | Export/import | Checking/fetching/rendering/writing state; saved, skipped, failed, pending, and bytes written |
+| Attachments/artifacts | Reference discovery, checksum verification, resolver attempts, streamed bytes/limits, saved/skipped/missing/failed/partial counts, and inert viewer generation |
 | Auxiliary snapshots | Each endpoint, HTTP availability, saved size, and saved/unavailable/failed/interrupted/not-attempted counts |
 | Local HTML | Candidate source files, discovered chats, ignored non-chat JSON, Markdown reads, rendered pages, warnings, and catalog writing |
 | Run completion | Elapsed time, warning count, exit status, and output/result locations |
@@ -73,4 +74,4 @@ If a new attempt fails, an earlier valid snapshot is retained; its presence alon
 
 Press **Ctrl+C** to stop. The CLI cleans up the live display, reports interruption, and exits **130**. Conversation files and their incremental checkpoints already saved remain available. On rerun, matching ID/format/update-time/checksum entries are skipped unless `--refresh` is supplied. Do not run concurrent writers into the same directory.
 
-Auxiliary status distinguishes endpoints that failed or were interrupted from ones never attempted. Checkpointing requires a writable filesystem; abrupt process termination or filesystem failure cannot guarantee a final status update. Auxiliary snapshots are refreshed on each later web export unless explicitly disabled; they are not treated as conversation checkpoints.
+Auxiliary status distinguishes endpoints that failed or were interrupted from ones never attempted. Checkpointing requires a writable filesystem; abrupt process termination or filesystem failure cannot guarantee a final status update. Auxiliary snapshots are refreshed on each later web export unless explicitly disabled; they are not treated as conversation checkpoints. Attachment references have their own durable queue and checksums under `.chatgpt-assets/manifest.json`; reruns can recover missing files without refetching unchanged JSON conversations. See [attachments](attachments.md).

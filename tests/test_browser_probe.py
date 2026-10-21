@@ -94,6 +94,7 @@ def test_download_is_valid_mise_toml_and_report_stays_redacted(workspace):
         "CHATGPT_OUTPUT_DIR": options["outputDir"],
         "CHATGPT_BUILD_INDEX": "true",
         "CHATGPT_AUXILIARY": "true",
+        "CHATGPT_ATTACHMENTS": "true",
         "CHATGPT_USER_AGENT": "Mozilla/5.0 FixtureChrome/123",
     }
     config = Config.from_env(env)
@@ -102,6 +103,7 @@ def test_download_is_valid_mise_toml_and_report_stays_redacted(workspace):
     assert config.output_dir == Path(options["outputDir"])
     assert config.build_index
     assert config.auxiliary
+    assert config.attachments
     assert config.user_agent == "Mozilla/5.0 FixtureChrome/123"
     assert options["token"] not in json.dumps(result["report"])
     assert result["removed"] == result["revoked"] == 1
@@ -119,6 +121,9 @@ def test_download_documents_output_index_projects_and_cookie_alternatives():
         "CHATGPT_PROGRESS",
         "CHATGPT_AUXILIARY",
         "--no-auxiliary",
+        "CHATGPT_ATTACHMENTS",
+        "CHATGPT_MAX_ATTACHMENT_BYTES",
+        "mise run attachments",
         "--no-progress",
         "CHATGPT_PROJECTS",
         "CHATGPT_SESSION_TOKEN_0",

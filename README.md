@@ -2,7 +2,7 @@
 
 Private derivative of [richlow/chatGPT_extractor](https://github.com/richlow/chatGPT_extractor), retaining the upstream Git history and MIT license. GitHub does not support making a public repository's fork private, so this is an independent private repository, not a GitHub fork-network member.
 
-Snapshot ChatGPT conversations plus available memories, custom instructions, and account/settings data by default. Conversations are raw JSON (default) or Markdown, grouped by project; auxiliary snapshots remain JSON. See [default snapshot contents and opt-out](docs/snapshots.md). Or convert a downloaded ChatGPT data export **offline**, without credentials or network access.
+Snapshot ChatGPT conversations, referenced attachments/images/artifacts, and available memories, custom instructions, and account/settings data by default. Conversations are raw JSON (default) or Markdown, grouped by project; auxiliary snapshots remain JSON. See [default snapshot contents and opt-out](docs/snapshots.md). Or convert a downloaded ChatGPT data export **offline**, without credentials or network access.
 
 **Live checks now pass with a desktop-browser User-Agent:** session exchange, regular listing, full project-sidebar pagination, user settings, and one conversation-detail response were verified. The earlier generic `Mozilla/5.0` header received Cloudflare challenges. Full bulk-export coverage and universal plan support are not claimed; these endpoints remain undocumented. See [API and UI investigation](docs/api-compatibility.md).
 
@@ -46,9 +46,9 @@ Bearer authentication takes precedence; a single cookie takes precedence over sp
 
 ### Generate the local TOML from your browser
 
-Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, `CHATGPT_USER_AGENT` (copied from `navigator.userAgent`), `CHATGPT_OUTPUT_DIR`, `CHATGPT_BUILD_INDEX`, and `CHATGPT_AUXILIARY`. Comments explain standalone index rebuilding, automatic project discovery, optional project overrides, and manually copied single/split-cookie alternatives. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
+Paste [`scripts/probe-chatgpt.js`](scripts/probe-chatgpt.js) into DevTools on your signed-in `https://chatgpt.com` tab. Enter the optional workspace account ID when prompted. After the checks, accept **Download mise.local.toml**, then enter the export output directory. The download contains a ready-to-use `[env]` table with `CHATGPT_ACCESS_TOKEN`, `CHATGPT_WORKSPACE_ID`, `CHATGPT_USER_AGENT` (copied from `navigator.userAgent`), `CHATGPT_OUTPUT_DIR`, `CHATGPT_BUILD_INDEX`, `CHATGPT_AUXILIARY`, and `CHATGPT_ATTACHMENTS`. Comments explain standalone index rebuilding, automatic project discovery, optional project overrides, and manually copied single/split-cookie alternatives. Decline that prompt for a diagnostic-only run. The console report stays redacted either way; the downloaded file contains the secret token.
 
-The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, merge those six keys under the existing `[env]` in `mise.local.toml` (keep intentional `CHATGPT_BUILD_INDEX` or `CHATGPT_AUXILIARY` overrides if already customized)**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
+The browser saves the file through its normal download mechanism; it cannot automatically update this repository or set file permissions. **In this existing checkout, merge those seven keys under the existing `[env]` in `mise.local.toml` (keep intentional `CHATGPT_BUILD_INDEX`, `CHATGPT_AUXILIARY`, or `CHATGPT_ATTACHMENTS` overrides if already customized)**, preserving your other settings. Do not paste a second `[env]` table or duplicate keys. On a fresh checkout without a local file, use the downloaded file as `mise.local.toml` instead of copying the example. Then run:
 
 ```sh
 chmod 600 mise.local.toml
@@ -79,14 +79,17 @@ Absolute paths, `~`, and relative paths are supported. With mise tasks, relative
 # Read-only authentication and response-shape check; no conversation bodies logged.
 mise run probe
 
-# Default snapshot: conversations, available memories/settings, and local HTML.
+# Default snapshot: conversations, attachments/artifacts, available memories/settings, and local HTML.
 mise run export
 
 # Markdown conversations; auxiliary data still uses JSON.
 mise run export -- --format markdown
 
 # Explicitly export conversations only (plus local HTML).
-mise run export -- --no-auxiliary
+mise run export -- --no-auxiliary --no-attachments
+
+# Backfill files/artifacts in an older JSON export without downloading conversations again.
+mise run attachments -- /path/to/previous/export
 
 # Ignore the incremental index and refetch everything.
 mise run export -- --refresh
@@ -135,6 +138,8 @@ All of these can go under `[env]` in `mise.local.toml`:
 | `CHATGPT_BUILD_INDEX` | `true` | Automatically build HTML after export/import; `--no-index` also disables it |
 | `CHATGPT_PROGRESS` | `true` | Rich terminal progress or timestamped redirected logs on stderr; `--no-progress` disables it |
 | `CHATGPT_AUXILIARY` | `true` | Include available memories/instructions/settings in web exports; `--no-auxiliary` disables, `--auxiliary` forces inclusion |
+| `CHATGPT_ATTACHMENTS` | `true` | Download referenced files/images and reconstruct selected-branch Canvas; `--no-attachments` disables |
+| `CHATGPT_MAX_ATTACHMENT_BYTES` | `536870912` | Per-asset limit (512 MiB); configurable from 1 byte through 2 GiB |
 | `CHATGPT_EXPORT_FORMAT` | `json` | `json` or `markdown` |
 | `CHATGPT_PAGE_SIZE` | `100` | Regular listing page size, 1–100 |
 | `CHATGPT_REQUEST_DELAY` | `1` | Minimum seconds between requests |
@@ -149,6 +154,18 @@ CHATGPT_PROJECTS = '[["g-p-0123456789abcdef0123456789abcdef", "Research"]]'
 ```
 
 Disabling automatic discovery exports only the regular listing and explicitly configured projects. It is an explicit scope reduction, not a fallback that silently claims all projects were exported.
+
+## Attachments, images, and artifacts
+
+Attachment handling is enabled by default. It recognizes uploaded-file metadata, `sediment://` / `file-service://` pointers, sandbox-generated downloads, and project files returned by project discovery. Canvas create/update operations are materialized locally; ambiguous or unapplied patches are marked partial and retain their operation history. Raw conversation JSON is not rewritten to remove references.
+
+Saved files, checksums, and per-reference outcomes live under `.chatgpt-assets/`. Re-running a JSON export also backfills assets for unchanged conversations; it does not skip attachment work just because the chat file exists. Use `mise run attachments -- /path/to/export` for existing raw JSON, or `--no-attachments` for a conversations-only run. Offline import restores uniquely matched bundled ZIP/local assets and Canvas without contacting the API; missing remote files are recorded rather than silently fetched.
+
+The local viewer adds raster previews, an attachment gallery, and inert file-view/download pages. Archived HTML/SVG/code is never navigated to directly by the archive UI. Browser wrappers are capped at 16 MiB; larger files remain saved locally and can be accessed from the export directory.
+
+**Library authentication:** some `/api/library/files/...` downloads require session cookies even when the conversation API accepts a bearer token. Keep a single cookie or complete `.0`/`.1` pair configured alongside the bearer token when needed. These cookies are sent only to approved ChatGPT content paths, never redirected storage hosts. The helper cannot read HttpOnly cookies; see [authentication](docs/authentication.md) and [attachment details](docs/attachments.md).
+
+Expired/deleted files, unsupported references, or incomplete Canvas reconstruction produce explicit manifest entries and a nonzero partial-export result. This is not a promise that every historical asset remains recoverable.
 
 ## Progress and run status
 
@@ -177,6 +194,10 @@ On Ctrl+C, the terminal is restored, saved conversation checkpoints remain, and 
 chatgpt_export/
 ├── index.html                            # open directly in a browser
 ├── .chatgpt-index/chats/…html              # generated readable chat pages
+├── .chatgpt-index/assets.html             # attachment gallery, when references exist
+├── .chatgpt-assets/manifest.json           # reference/status/hash inventory
+├── .chatgpt-assets/files/…                # downloaded binaries
+├── .chatgpt-assets/canvas/…               # Canvas text and operation histories
 ├── .export-index.json
 ├── _Uncategorized/
 │   └── Title--<conversation-id-hash>.json
@@ -190,7 +211,7 @@ chatgpt_export/
 - ID-derived suffixes distinguish identical titles and same-named projects regardless of listing order.
 - Skip only when ID, format, update timestamp, output path, and file checksum match. Missing timestamps are refetched. `--refresh` bypasses skipping.
 - Writes are atomic and files are owner-readable/writable only on POSIX. New output folders use mode 0700. Existing directory permissions are not changed.
-- Raw JSON retains all branches and structured content. Markdown follows `current_node` ancestry; older archives without it fall back to the first-child branch. Markdown notes non-text content but does not download attachments, images, audio, or project files.
+- Raw JSON retains all branches and structured content. Markdown follows `current_node` ancestry; older archives without it fall back to the first-child branch. Attachment downloads are separate from Markdown rendering; saved assets are linked by the local viewer. Remote citation/web images without ChatGPT asset references are not fetched.
 - Renamed/moved conversations produce a new path; old files are retained, not deleted. Existing exports using the original filename scheme are also left untouched and are not trusted as an incremental index.
 - Broken pagination/listing fails rather than reporting a partial listing as success. Individual unavailable conversations produce a nonzero exit; required-request 401/403 stops the export. Auxiliary snapshots are enabled by default: inaccessible endpoints (plain 403/404/405) are recorded as unavailable and do not prevent the remaining checks. A 401 or explicit browser challenge still stops the run. Earlier valid snapshots are not replaced by error payloads.
 - Do not run two exports into the same output directory concurrently. An export is not a point-in-time snapshot if conversations change during pagination. Deleted/temporary chats and inaccessible workspace data cannot be recovered.
@@ -208,11 +229,11 @@ This only scans files already on disk. It does not log in, call an API, run an e
 
 The page provides project/folder counts, title/folder/filename search, project filters, update/title/project sorting, readable chat pages, and links to the original JSON/Markdown files. It works directly over `file://`: no local server, npm, CDN, remote fonts, or external requests. See [local index details](docs/local-index.md) for supported layouts, deduplication, templates, and limits.
 
-New exports/imports build the HTML automatically. Disable that with `CHATGPT_BUILD_INDEX = "false"` or `--no-index`, then rebuild explicitly whenever needed. Moving the whole archive preserves relative links; keep the hidden `.chatgpt-index` directory with `index.html`. Generated pages contain private conversation text, not just metadata: do not commit, publish, or share them inadvertently.
+New exports/imports build the HTML automatically. Disable that with `CHATGPT_BUILD_INDEX = "false"` or `--no-index`, then rebuild explicitly whenever needed. Moving the whole archive preserves relative links; keep the hidden `.chatgpt-index` and `.chatgpt-assets` directories with `index.html`. Generated pages contain private conversation text, not just metadata: do not commit, publish, or share them inadvertently.
 
 ## Development
 
-`export_config.py` validates environment configuration; `chatgpt_client.py` owns read-only transport, authentication, retries, and pagination; `chatgpt_exporter.py` owns offline import and the CLI. `conversation_format.py` shares pure rendering between exports and the viewer; `export_io.py` owns atomic private output; `local_index.py` scans archives and builds pages using `templates/index.html` and `templates/conversation.html`. `main.py` delegates to that CLI. `progress_report.py` owns shared progress rendering and stream separation. Tests disable real network access and clear inherited ChatGPT credentials. CI runs only offline gates and needs no ChatGPT secrets.
+`export_config.py` validates environment configuration; `chatgpt_client.py` owns read-only transport, authentication, retries, and pagination; `chatgpt_exporter.py` owns offline import and the CLI. `conversation_format.py` shares pure rendering between exports and the viewer; `export_io.py` owns atomic private output; `local_index.py` scans archives and builds pages using `templates/index.html` and `templates/conversation.html`. `main.py` delegates to that CLI. `progress_report.py` owns shared progress rendering and stream separation. Attachment discovery, transfers, Canvas replay, and safe file views are isolated in `attachment_refs.py`, `attachment_transport.py`, `attachments.py`, `canvas_artifacts.py`, and `attachment_view.py`. Tests disable real network access and clear inherited ChatGPT credentials. CI runs only offline gates and needs no ChatGPT secrets.
 
 ## License
 

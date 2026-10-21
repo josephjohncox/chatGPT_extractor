@@ -1,0 +1,50 @@
+{{MARKER}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>{{TITLE}} · Saved attachment</title>
+<style>
+:root{color-scheme:light dark}body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:auto;padding:2rem}a{color:#087b99}button{font:inherit;padding:.6rem 1rem;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #74869b;border-radius:8px;padding:1rem}p{overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<nav><a href="../assets.html">← Attachments &amp; artifacts</a></nav>
+<h1>{{TITLE}}</h1>
+<p>{{STATUS}} · {{SIZE}} bytes. This page is an inert copy; archived markup/code is never executed.</p>
+<button id="download" type="button">Download original file</button>
+{{PREVIEW}}
+<script type="application/json" id="payload">{{PAYLOAD}}</script>
+<script>
+(() => {
+  const button = document.getElementById("download");
+  let payload;
+  try {
+    payload = JSON.parse(document.getElementById("payload").textContent);
+    if (typeof payload.name !== "string" || typeof payload.data !== "string") throw new Error("Invalid payload");
+  } catch {
+    button.disabled = true;
+    button.textContent = "Unable to read this saved attachment; rebuild the index";
+    return;
+  }
+  button.addEventListener("click", () => {
+    try {
+    const bytes = Uint8Array.from(atob(payload.data), char => char.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], {type: "application/octet-stream"}));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = payload.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      button.textContent = "Unable to prepare download; rebuild the index";
+    }
+  });
+})();
+</script>
+</body>
+</html>

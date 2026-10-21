@@ -1,6 +1,7 @@
 # Copy to mise.local.toml, then chmod 600 mise.local.toml.
 # mise loads mise.local.toml automatically; it is ignored by Git.
-# Use ONLY one authentication method. Values are cookie contents, not headers.
+# Core API auth selects bearer or cookie exchange. Library downloads may need cookies too.
+# Bearer and session cookies may coexist; use only one cookie format. Copy values, not headers.
 # Token instructions: docs/authentication.md
 # Chrome/Edge: sign in at https://chatgpt.com in your normal browser profile.
 # Open DevTools: macOS Cmd+Option+I; Windows/Linux Ctrl+Shift+I or F12.
@@ -8,13 +9,14 @@
 # Filter for session-token. Copy the complete Value, not the Name or Cookie header.
 # Single __Secure-next-auth.session-token -> CHATGPT_SESSION_TOKEN.
 # Split __Secure-next-auth.session-token.0 / .1 -> the matching _0 / _1 keys.
-# Do not join the parts. Clear the unused cookie fields as well as the bearer token.
+# Do not join the parts. Clear unused cookie fields. Clear bearer only to force API cookie exchange.
 # Check without exporting: mise run probe. Offline indexing needs no credentials.
 [env]
 # Method A: Bearer accessToken from https://chatgpt.com/api/auth/session
 # Copy only the accessToken string value, without JSON quotes or a Bearer prefix.
 # Or run scripts/probe-chatgpt.js in the signed-in tab to download local TOML.
-# Bearer takes precedence. Clear it to use cookies; expired bearers do not fall back.
+# Bearer takes precedence for core API auth; expired bearers do not fall back automatically.
+# Keep single/split cookies alongside it when /api/library/files downloads require a cookie session.
 CHATGPT_ACCESS_TOKEN = ""
 # Method B: one __Secure-next-auth.session-token cookie
 CHATGPT_SESSION_TOKEN = ""
@@ -36,6 +38,11 @@ CHATGPT_EXPORT_FORMAT = "json"
 # Default web snapshot includes available memories, custom instructions, and account/settings data.
 # Set false or pass --no-auxiliary for conversations only; --auxiliary forces inclusion.
 CHATGPT_AUXILIARY = "true"
+# Download referenced images/files/artifacts and materialize selected-branch Canvas by default.
+# Opt out with --no-attachments; backfill existing raw JSON with mise run attachments -- /path/to/export.
+CHATGPT_ATTACHMENTS = "true"
+# Per-file cap (512 MiB); values above 2 GiB are rejected. Incomplete assets are reported.
+CHATGPT_MAX_ATTACHMENT_BYTES = "536870912"
 # Output for export/import; also the default directory for the offline index.
 # Absolute paths and ~ are supported; relative paths are repository-relative under mise.
 CHATGPT_OUTPUT_DIR = "chatgpt_export"

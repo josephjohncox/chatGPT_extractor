@@ -28,8 +28,8 @@ def sanitize_filename(name: str) -> str:
     return name.encode("utf-8")[:100].decode("utf-8", errors="ignore") or "Untitled"
 
 
-def extract_messages(detail: dict) -> list[dict]:
-    """Render the selected branch (current_node ancestry), not the first regeneration."""
+def selected_nodes(detail: dict) -> list[dict]:
+    """Return selected ancestry including tool calls; reject broken branches."""
     mapping = detail.get("mapping", {})
     if not isinstance(mapping, dict) or not mapping:
         return []
@@ -60,6 +60,12 @@ def extract_messages(detail: dict) -> list[dict]:
             node = mapping[node_id]
             branch.append(node)
             node_id = next(iter(node.get("children", [])), None)
+    return branch
+
+
+def extract_messages(detail: dict) -> list[dict]:
+    """Render visible user/assistant messages from the selected branch."""
+    branch = selected_nodes(detail)
     messages = []
     for node in branch:
         msg = node.get("message") or {}

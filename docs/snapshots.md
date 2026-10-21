@@ -6,7 +6,7 @@ Run:
 mise run export
 ```
 
-The default web export saves conversations, attempts all eight auxiliary snapshots below, and builds the local chat/project HTML index. Conversation format follows `CHATGPT_EXPORT_FORMAT`; auxiliary snapshots always use JSON.
+The default web export saves conversations, downloads supported referenced files/images/artifacts, attempts all eight auxiliary snapshots below, and builds the local chat/project HTML index. See [attachment support and limits](attachments.md). Conversation format follows `CHATGPT_EXPORT_FORMAT`; auxiliary snapshots always use JSON.
 
 | Snapshot | Local file |
 |---|---|
@@ -24,8 +24,11 @@ Existing valid snapshots are retained if the corresponding new request is unavai
 ## Opt out or override configuration
 
 ```sh
-# Conversations and local HTML only:
+# Skip memories/settings but retain conversation attachments and HTML:
 mise run export -- --no-auxiliary
+
+# Conversations and local HTML only:
+mise run export -- --no-auxiliary --no-attachments
 
 # Explicitly include auxiliary snapshots, even if config disables them:
 mise run export -- --auxiliary
@@ -46,6 +49,6 @@ Required conversation-list/detail requests keep their stricter authentication/ac
 
 ## Scope limits
 
-These are snapshots of configured, undocumented endpoints, not a verified complete account backup. The memories request is currently a single payload; memory pagination/completeness has not been audited. Attachments, images, audio, generated files, and project-level files/instructions are not separately downloaded. Conversation JSON retains the references returned by the API.
+These are snapshots of configured, undocumented endpoints, not a verified complete account backup. The memories request is currently a single payload; memory pagination/completeness has not been audited. Supported attachment/image/audio file IDs, generated sandbox links, project uploads exposed by discovery, and selected-branch Canvas are handled by the attachment pipeline. Unsupported, expired, or incomplete references are recorded explicitly; project instructions and an account-wide unreferenced file-library inventory are not part of this feature. Conversation JSON retains its original references.
 
 Conversation discovery still follows the configured project and archived-chat scope. The HTML index currently browses chats, not the memories/settings payloads. Auxiliary JSON can contain sensitive account data and remains subject to the same private-output handling as the conversations.

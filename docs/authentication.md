@@ -21,7 +21,7 @@ If it already exists, keep it. Edit the matching keys under its existing `[env]`
 | Cookies ending in `.0` and `.1` | Copy each value into `CHATGPT_SESSION_TOKEN_0` and `_1` |
 | A browser session response containing `accessToken` | Use the helper or copy that value into `CHATGPT_ACCESS_TOKEN` |
 
-Use one method at a time. An OpenAI Platform API key (`sk-…`), project ID, and workspace ID are not session tokens.
+For the conversation API, choose bearer authentication or cookie-based session exchange. Some library attachment downloads also require session cookies alongside the bearer token; use only one cookie format at a time. An OpenAI Platform API key (`sk-…`), project ID, and workspace ID are not session tokens.
 
 ## 1. Open the browser's cookie view
 
@@ -87,6 +87,14 @@ If you find only `.1`, refresh ChatGPT and check that your filter has not hidden
 
 Cookies marked **HttpOnly** are visible in the browser's Developer Tools but unavailable to page JavaScript. The helper cannot automatically extract those cookie values.
 
+## Cookies for library attachment downloads
+
+Some file resolvers return `/api/library/files/...` content URLs. Live checks showed a bearer-only content request returning 401 while the same request succeeded with the session cookies. For these downloads, copy the single cookie or full `.0`/`.1` pair using the steps above, **but the bearer token may remain configured**. Clear only the unused cookie format so a stale single-cookie value cannot override the split pair.
+
+The earlier snippets clear `CHATGPT_ACCESS_TOKEN` to demonstrate cookie-based API exchange. That clearing is not required when you are adding cookies for library downloads. Use cookies and bearer tokens from the same signed-in account/workspace. The helper cannot extract HttpOnly cookies automatically.
+
+These session cookies are sent only to approved ChatGPT content paths. They are stripped on storage redirects; external signed-download sessions do not inherit account authorization, cookies, netrc, or client certificates. If a library download still returns 401, update the cookies from the current signed-in tab rather than assuming the bearer token is the missing field.
+
 ## 3. Set the workspace account ID, if needed
 
 For a personal/default account, start with `CHATGPT_WORKSPACE_ID = ""`.
@@ -132,7 +140,7 @@ Do not paste a token, full session response, cookie-table screenshot, credential
 
 ## Alternative: get a bearer token
 
-A bearer token avoids copying session-cookie parts. It can expire independently; the exporter does not fall back from an expired configured bearer token to cookies.
+A bearer token avoids cookie exchange for the conversation API, but some library attachment downloads still need session cookies. It can expire independently; the exporter does not fall back from an expired configured bearer token to cookies.
 
 ### Use the helper
 
@@ -141,7 +149,7 @@ A bearer token avoids copying session-cookie parts. It can expire independently;
 3. Paste and run the script. It requests `/api/auth/session` using that browser session; it does not read HttpOnly cookies.
 4. Enter the optional workspace account ID, or leave it blank for the personal/default account.
 5. Accept the credential-file download and enter the export output directory. The browser saves `mise.local.toml` through its normal download mechanism.
-6. If your repository already has `mise.local.toml`, merge the downloaded keys into its existing `[env]`. Keep unrelated settings and any intentional index-generation preference. On a fresh checkout, use the downloaded file as the local file.
+6. If your repository already has `mise.local.toml`, merge the downloaded keys into its existing `[env]`. Keep unrelated settings and intentional index/auxiliary/attachment preferences. On a fresh checkout, use the downloaded file as the local file.
 7. Run the authentication check above. Delete any redundant downloaded credential file after saving the values locally.
 
 The download also copies `navigator.userAgent` into `CHATGPT_USER_AGENT`. Its comments document output/index settings and the manual cookie alternatives. The console report stays redacted. Generating a token in the browser does not prove it will work outside that browser.
@@ -150,7 +158,7 @@ The download also copies `navigator.userAgent` into `CHATGPT_USER_AGENT`. Its co
 
 1. In the signed-in browser, open **https://chatgpt.com/api/auth/session**.
 2. Find the JSON field named **accessToken**. Copy only its string value, without the JSON quotes. Do not copy the whole response or a different token field.
-3. Put it between the TOML quotes below and clear the cookie fields:
+3. Put it between the TOML quotes below. This example clears cookie fields for a bearer-only setup; keep a valid single/split cookie format instead if library downloads require it:
 
 ```toml
 CHATGPT_ACCESS_TOKEN = "accessToken-field-value"

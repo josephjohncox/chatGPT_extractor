@@ -71,6 +71,7 @@ class ChatGPTClient:
         self.session = session if session is not None else requests.Session()
         self.progress = progress if progress is not None else NO_PROGRESS
         self._last_request: float | None = None
+        self.project_files: dict[str, list[dict]] = {}
 
     def headers(self, token: str = "") -> dict[str, str]:
         headers = {
@@ -314,7 +315,13 @@ class ChatGPTClient:
                 items = self.items(payload, "items", "gizmos")
                 for item in items:
                     gizmo = item
+                    files: list[dict] = []
                     for _ in range(3):
+                        if isinstance(gizmo.get("files"), list):
+                            files.extend(
+                                record if isinstance(record, dict) else {"id": record}
+                                for record in gizmo["files"]
+                            )
                         if not isinstance(gizmo.get("gizmo"), dict):
                             break
                         gizmo = gizmo["gizmo"]
@@ -329,6 +336,7 @@ class ChatGPTClient:
                             )
                         name = display.get("name") or gizmo.get("name") or ident
                         projects[normalize_project_id(ident)] = str(name)
+                        self.project_files[normalize_project_id(ident)] = files
                 work.update(
                     completed=len(projects),
                     detail=f"page {page_number}; {len(projects)} projects discovered",

@@ -29,6 +29,10 @@ run = "uv run --locked -- python chatgpt_exporter.py probe"
 description = "Convert an official JSON/ZIP export offline; pass archive path and options"
 run = "uv run --locked -- python chatgpt_exporter.py import"
 
+[tasks.attachments]
+description = "Backfill images/files/artifacts from existing raw JSON without re-exporting conversations"
+run = "uv run --locked -- python chatgpt_exporter.py attachments"
+
 [tasks.index]
 description = "Build an offline HTML chat/project index from existing exports (no credentials or network)"
 run = "uv run --locked -- python chatgpt_exporter.py index"
@@ -51,7 +55,7 @@ run = "uv run --locked -- ruff format --check ."
 
 [tasks.typecheck]
 description = "Check application types"
-run = "uv run --locked -- mypy chatgpt_exporter.py chatgpt_client.py export_config.py conversation_format.py export_io.py local_index.py progress_report.py"
+run = "uv run --locked -- mypy chatgpt_exporter.py chatgpt_client.py export_config.py conversation_format.py export_io.py local_index.py progress_report.py attachment_refs.py attachment_transport.py attachments.py attachment_view.py canvas_artifacts.py"
 
 [tasks.check]
 description = "Run offline quality gates"

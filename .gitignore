@@ -8,6 +8,7 @@ chatgpt_export*/
 exports/
 .local/
 .chatgpt-index/
+.chatgpt-assets/
 *.har
 
 # Local tools and caches

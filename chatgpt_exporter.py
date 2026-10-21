@@ -8,9 +8,11 @@ import os
 import sys
 import time
 import zipfile
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
+from attachments import AttachmentManager
 from chatgpt_client import ChatGPTClient, ExportError, HTTPError
 from conversation_format import (
     conversation_to_markdown,
@@ -188,6 +190,7 @@ def export_conversations(
     *,
     refresh: bool = False,
     progress: ProgressReporter | None = None,
+    assets: AttachmentManager | None = None,
 ) -> int:
     report = progress if progress is not None else NO_PROGRESS
     unique: dict[str, dict] = {}
@@ -235,6 +238,16 @@ def export_conversations(
                 ):
                     skipped += 1
                     work.advance(detail="unchanged; " + summary())
+                    if assets is not None:
+                        if config.output_format == "json":
+                            assets.process(
+                                decode_json(path.read_text(encoding="utf-8")),
+                                {**meta, "_attachment_source": relative},
+                            )
+                        elif not assets.conversation_complete(ident, updated):
+                            assets.process(
+                                fetch_detail(ident), {**meta, "_attachment_source": relative}
+                            )
                     continue
                 try:
                     work.update(detail=f"fetching {position}/{len(unique)}; {summary()}")
@@ -289,6 +302,8 @@ def export_conversations(
                 saved += 1
                 written += len(content)
                 work.advance(detail=summary())
+                if assets is not None:
+                    assets.process(detail, {**meta, "_attachment_source": relative})
             work.finish(summary(), state="partial" if failed else "done")
         finally:
             report.notice("Conversation summary: " + summary())
@@ -311,6 +326,10 @@ def load_archive(path: Path) -> list[dict]:
             if archive.getinfo(candidates[0]).file_size > 512 * 1024 * 1024:
                 raise ExportError(
                     "conversations.json exceeds 512 MiB; provide a smaller JSON archive"
+                )
+            if archive.getinfo(candidates[0]).flag_bits & 1:
+                raise ExportError(
+                    "Encrypted conversation archives are not supported; decrypt locally before import"
                 )
             data = decode_json(archive.read(candidates[0]))
     else:
@@ -353,11 +372,33 @@ def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
         output_format=args.format or config.output_format,
         output_dir=output_directory(str(args.output or config.output_dir)),
         auxiliary=config.auxiliary if args.auxiliary is None else args.auxiliary,
+        attachments=config.attachments if args.attachments is None else args.attachments,
     )
     if args.command != "probe":
-        report.notice(
-            f"Output: {config.output_dir.resolve()}; format={config.output_format}; HTML={'enabled' if config.build_index and not args.no_index else 'disabled'}"
+        target = (
+            (args.archive or config.output_dir)
+            if args.command == "attachments"
+            else config.output_dir
         )
+        report.notice(
+            f"Output: {target.expanduser().resolve()}; format={config.output_format}; HTML={'enabled' if config.build_index and not args.no_index else 'disabled'}; attachments={'enabled' if config.attachments or args.command == 'attachments' else 'disabled'}; asset_limit={human_bytes(config.max_attachment_bytes)}"
+        )
+    if args.command == "attachments":
+        directory = (args.archive or config.output_dir).expanduser().resolve()
+        if not directory.is_dir():
+            raise ExportError("Attachment backfill requires an existing export directory")
+        client = ChatGPTClient(config, progress=report)
+        with AttachmentManager(
+            directory,
+            client=client,
+            max_bytes=config.max_attachment_bytes,
+            refresh=args.refresh,
+            progress=report,
+        ) as assets:
+            result = assets.backfill()
+        if config.build_index and not args.no_index:
+            result = max(result, generate_local_index(directory, progress=report))
+        return result
     if args.command == "import":
         assert args.archive is not None
         with report.stage("Read offline archive", total=1) as work:
@@ -369,9 +410,27 @@ def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
             if not isinstance(ident, str) or not ident or ident in by_id:
                 raise ExportError("Archive has a missing or duplicate conversation ID")
             by_id[ident] = item
-        result = export_conversations(
-            conversations, by_id.__getitem__, config, refresh=args.refresh, progress=report
-        )
+        with (
+            AttachmentManager(
+                config.output_dir,
+                offline_source=args.archive,
+                max_bytes=config.max_attachment_bytes,
+                refresh=args.refresh,
+                progress=report,
+            )
+            if config.attachments
+            else nullcontext()
+        ) as assets:
+            result = export_conversations(
+                conversations,
+                by_id.__getitem__,
+                config,
+                refresh=args.refresh,
+                progress=report,
+                assets=assets,
+            )
+            if assets is not None:
+                result = max(result, assets.finish())
     else:
         client = ChatGPTClient(config, progress=report)
         if args.command == "probe":
@@ -380,20 +439,38 @@ def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
             report.result(json.dumps(result_report, indent=2))
             return int(any("error" in endpoint for endpoint in result_report["endpoints"].values()))
         report.notice(
-            f"Export scope: auto_projects={config.auto_projects}; archived={config.include_archived}; auxiliary={config.auxiliary}; request_delay={config.request_delay:.1f}s; timeout={config.timeout:.1f}s"
+            f"Export scope: auto_projects={config.auto_projects}; archived={config.include_archived}; auxiliary={config.auxiliary}; attachments={config.attachments}; asset_limit={human_bytes(config.max_attachment_bytes)}; request_delay={config.request_delay:.1f}s; timeout={config.timeout:.1f}s"
         )
         token = client.access_token()
         conversations = client.all_conversations(token)
         report.notice(
             f"Discovered {len(conversations)} conversations (including configured/discovered projects)"
         )
-        result = export_conversations(
-            conversations,
-            lambda ident: client.detail(ident, token),
-            config,
-            refresh=args.refresh,
-            progress=report,
-        )
+        with (
+            AttachmentManager(
+                config.output_dir,
+                client=client,
+                access_token=token,
+                max_bytes=config.max_attachment_bytes,
+                refresh=args.refresh,
+                progress=report,
+            )
+            if config.attachments
+            else nullcontext()
+        ) as assets:
+            result = export_conversations(
+                conversations,
+                lambda ident: client.detail(ident, token),
+                config,
+                refresh=args.refresh,
+                progress=report,
+                assets=assets,
+            )
+            if assets is not None:
+                assets.projects(client.project_files)
+                result = max(result, assets.finish())
+            else:
+                report.notice("Attachment downloads explicitly disabled")
         if config.auxiliary:
             export_auxiliary_data(client, token, config.output_dir, progress=report)
         else:
@@ -412,15 +489,24 @@ def run_command(args: argparse.Namespace, report: ProgressReporter) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", nargs="?", choices=["export", "probe", "import", "index"], default="export"
+        "command",
+        nargs="?",
+        choices=["export", "probe", "import", "index", "attachments"],
+        default="export",
     )
     parser.add_argument(
         "archive",
         nargs="?",
         type=Path,
-        help="Archive file (import) or existing export directory (index)",
+        help="Archive file (import) or existing export directory (index/attachments)",
     )
     parser.add_argument("--format", choices=["json", "markdown"])
+    parser.add_argument(
+        "--attachments",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Download referenced files/images and materialize Canvas by default; --no-attachments opts out",
+    )
     parser.add_argument(
         "--no-progress",
         action="store_true",
@@ -448,10 +534,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "import" and args.archive is None:
         parser.error("import requires an archive path")
-    if args.command not in {"import", "index"} and args.archive is not None:
-        parser.error("a source path is valid only for import or index")
-    if args.command == "index" and args.archive is not None and args.output is not None:
-        parser.error("index accepts a directory argument or --output, not both")
+    if args.command not in {"import", "index", "attachments"} and args.archive is not None:
+        parser.error("a source path is valid only for import, index, or attachments")
+    if (
+        args.command in {"index", "attachments"}
+        and args.archive is not None
+        and args.output is not None
+    ):
+        parser.error(f"{args.command} accepts a directory argument or --output, not both")
+    if args.command == "attachments" and args.attachments is False:
+        parser.error("The attachments command cannot be combined with --no-attachments")
     report = None
     started = time.monotonic()
     try:

@@ -1,0 +1,20 @@
+{{MARKER}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Attachments &amp; artifacts · {{DIRECTORY}}</title>
+<style>
+:root{color-scheme:light dark}body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:auto;padding:2rem}a{color:#087b99}.metadata{font-size:.85rem;color:#74869b}.attachment{border:1px solid #74869b;border-radius:8px;padding:1rem;margin:1rem 0}.attachment-preview{max-width:100%;max-height:600px;object-fit:contain}.notice{padding:1rem;border:1px solid #74869b}
+</style>
+</head>
+<body>
+<nav><a href="../index.html">← Chat/project index</a></nav>
+<h1>Attachments &amp; artifacts</h1>
+<p>{{DIRECTORY}} · {{COUNT}} references. Status describes the last attachment attempt; source JSON is retained.</p>
+<p>Images preview only when local file signatures identify supported raster formats. Other artifacts are download-only; no archived HTML, SVG, or code is executed.</p>
+{{ASSET_ITEMS}}
+</body>
+</html>

@@ -16,7 +16,7 @@ mise run index -- --output /path/to/previous/export
 open /path/to/previous/export/index.html
 ```
 
-The command writes `index.html` plus readable pages under `.chatgpt-index/chats/`. All links are relative. Keep these generated pages with the original directory if you move it. No HTTP server, network access, or third-party browser assets are required. `index` reads only the directory setting, so expired/malformed API credentials cannot block browsing local files.
+The command writes `index.html` plus readable pages under `.chatgpt-index/chats/`. All links are relative. Keep these generated pages with the original directory if you move it. No HTTP server, network access, or third-party browser assets are required. `index` reads the directory/progress settings, not authentication settings, so expired/malformed API credentials cannot block browsing local files.
 
 `export` and `import` also build the index by default. Set `CHATGPT_BUILD_INDEX = "false"` under `[env]` or pass `--no-index` to disable this. Rebuilding HTML does not use or update `.export-index.json` and does not modify any input JSON/Markdown file. The generated view is a snapshot, not a live filesystem browser.
 
@@ -35,7 +35,7 @@ Chats with the same conversation ID are grouped, even across renamed files/folde
 
 The index has a folder sidebar, project selector, title/folder/filename search, date/title/project sorting, counts, and links to both readable pages and original files. Search is metadata-only, not full-text conversation search. With JavaScript disabled, the entire table and file links remain available; filtering/sorting requires JavaScript.
 
-JSON pages show the selected `current_node` branch. Archives missing `current_node` use the older first-child fallback. Markdown is displayed as escaped plain text, preserving formatting syntax rather than interpreting it. Both formats avoid executing embedded HTML or loading image/link targets. Non-text assets remain references in the original JSON; images, audio, files, and project attachments are not downloaded or reconstructed.
+JSON pages show the selected `current_node` branch. Archives missing `current_node` use the older first-child fallback. Markdown is displayed as escaped plain text, preserving formatting syntax rather than interpreting it. Both formats avoid interpreting message HTML or fetching message image/link targets. When the attachment manifest is present, pages add recognized local raster previews and links to inert asset viewers; the main catalog links an attachment gallery. Files are downloaded only by export/backfill, never by `index`. HTML/SVG/code and other files are downloaded from the safe viewer as inert blobs rather than navigated to directly. Browser wrappers are capped at 16 MiB; larger originals remain on disk. See [attachments](attachments.md).
 
 Numeric timestamps and ISO dates are supported. Legacy Markdown timestamps without a timezone are interpreted as UTC for sorting/display; their original text remains in the source.
 
@@ -45,10 +45,13 @@ A rendering error leaves a page with a warning and source links, rather than mak
 
 - `templates/index.html`: catalog layout, styling, and offline search/filter/sort code.
 - `templates/conversation.html`: individual chat page layout and styling.
+- `templates/assets.html`: attachment gallery.
+- `templates/asset-file.html`: inert per-file preview and Blob download control.
+- `attachment_view.py`: managed-path validation and encoded asset viewers.
 - `local_index.py`: discovery, grouping, safe relative links, and template binding.
 
-Templates use uppercase `{{PLACEHOLDER}}` markers, substituted once. All archive-controlled text and paths are escaped before insertion. There are no external libraries or arbitrary templates from the archive itself. Re-run `mise run index` after editing the repository templates.
+Templates use uppercase `{{PLACEHOLDER}}` markers, substituted once. All archive-controlled text and paths are escaped before insertion. The browser pages use no external libraries or templates supplied by the archive itself. Re-run `mise run index` after editing the repository templates.
 
 Generated files use atomic replacement and POSIX mode 0600; new managed directories use 0700. Existing original export directory permissions are not changed. The generator refuses to overwrite an unrelated `index.html`, use an unowned `.chatgpt-index` directory, or write through managed-directory symlinks. Move conflicting user-owned output aside before building. Old generated chat pages are retained on rebuild rather than deleted; to remove stale pages, remove only the generated `.chatgpt-index` directory and generated `index.html`, then rebuild.
 
-The HTML includes private chat titles and message text. It does not embed configuration credentials, but chat messages may themselves contain secrets. Default export directories and `.chatgpt-index/` are Git-ignored. If the chosen directory is inside a Git repository, ignore the entire directory (including its `index.html` and source files), not just the companion pages. No source JSON/Markdown is uploaded or published by indexing.
+The HTML includes private chat titles and message text. It does not embed configuration credentials, but chat messages may themselves contain secrets. Default export directories, `.chatgpt-index/`, and `.chatgpt-assets/` are Git-ignored. Keep both hidden directories when moving the archive. If the chosen directory is inside a Git repository, ignore the entire directory (including its `index.html` and source files), not just the companion pages. No source JSON/Markdown is uploaded or published by indexing.

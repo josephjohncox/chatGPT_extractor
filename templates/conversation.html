@@ -4,10 +4,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' file:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>{{TITLE}} · ChatGPT archive</title>
 <style>
 :root{color-scheme:light dark;--bg:#f4f7fa;--panel:#fff;--text:#172332;--muted:#536475;--line:#dce4ed;--accent:#076b82}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,sans-serif}main{max-width:1000px;margin:auto;padding:2rem 1.5rem 4rem}a{color:var(--accent);text-underline-offset:3px}h1{line-height:1.25;overflow-wrap:anywhere}h2{font-size:1rem;margin:0}.metadata,time{color:var(--muted);font-size:.85rem}.message{padding:1.4rem;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:1rem 0}.message.user{border-left:4px solid var(--accent)}pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin-bottom:0}.markdown{padding:1.4rem;background:var(--panel);border-radius:8px}.notice{padding:1rem;border:1px solid var(--line)}footer{border-top:1px solid var(--line);padding-top:1rem;margin-top:2rem;font-size:.85rem;color:var(--muted)}@media(prefers-color-scheme:dark){:root{--bg:#101820;--panel:#18232f;--text:#e2eaf3;--muted:#a1b0c1;--line:#304255;--accent:#6ed6df}}
+.attachment{border:1px solid var(--line);border-radius:8px;padding:1rem;margin:1rem 0}.attachment-preview{max-width:100%;max-height:600px;object-fit:contain}
 </style>
 </head>
 <body>
@@ -16,7 +17,8 @@
 <h1>{{TITLE}}</h1>
 <p class="metadata">{{PROJECT}}<br>Created {{CREATED}} · Updated {{UPDATED}}</p>
 {{CONTENT}}
-<footer><p>Original files: {{SOURCES}}</p><p>Offline plain-text view. Formatting syntax is preserved as text, not interpreted as HTML. Raw JSON retains all branches and non-text content.</p></footer>
+{{ASSETS}}
+<footer><p>Original files: {{SOURCES}}</p><p>Offline plain-text view. Formatting syntax is preserved as text, not interpreted as HTML. Raw JSON retains all branches and non-text content. Saved assets are linked below the chat; HTML/SVG/code artifacts are downloaded, not executed.</p></footer>
 </main>
 </body>
 </html>
