@@ -41,6 +41,20 @@ Open the reported `index.html` in a browser. It works over `file://`; no server,
 
 To obtain an official export, use ChatGPT **Settings → Data controls → Export data**, where available. [Availability varies by plan/workspace](https://help.openai.com/en/articles/7260999-how-do-i-export-my-chatgpt-history-and-data); the importer reads a downloaded archive and does not request it for you.
 
+## Upload an archive to Open WebUI
+
+Preview a raw JSON export without making network requests:
+
+```sh
+uv run python openwebui_import.py chatgpt_export_oct_2026
+```
+
+Add `--upload` after setting `OPENWEBUI_URL` and `OPENWEBUI_TOKEN` to import chats with their original dates and visible branches. Start with `--upload --limit 1`. A local journal lets later runs skip completed uploads. Attachment binaries and project folders are not transferred.
+
+Use `--include-memories` to import saved memories and `--instructions prompt` to create a reusable custom-instructions prompt. Use `--instructions system` instead to apply the instructions as your account's system prompt; it refuses to overwrite a different existing prompt. Add `--only-extras` to skip chats. Memory imports invoke the server's embedding service and receive new timestamps.
+
+See [Open WebUI import](docs/openwebui-import.md) for credentials, timestamp handling, and recovery after an interrupted upload.
+
 ## Set up a live web snapshot
 
 1. Copy the example **only if you do not already have a local config**:
