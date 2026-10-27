@@ -65,7 +65,7 @@ def test_literal_svelte_svg_loop_becomes_accessible_diagram_text():
   </svg>
 </box>"""
     result = render_layouts(text)
-    assert result.startswith("\n\n```svg\n<svg") and result.rstrip().endswith("```")
+    assert result.startswith("\n\n```mermaid\nflowchart TB")
     for label in [
         "Original work",
         "Clear exposition",
@@ -73,14 +73,15 @@ def test_literal_svelte_svg_loop_becomes_accessible_diagram_text():
         "Feedback and collaboration improve the work",
     ]:
         assert label in result
-    assert "<rect" in result and "<path" in result
-    assert "Unsupported layout" not in result and "{#each" not in result
+    assert "N1 --> N2" in result
+    assert "<svg" not in result and "Unsupported layout" not in result
+    assert "{#each" not in result
 
 
-def test_static_svg_becomes_openwebui_svg_artifact_without_executing_code():
+def test_static_svg_becomes_native_mermaid_without_executing_code():
     result = render_layouts("<box><svg><text>Static SVG label</text></svg></box>")
-    assert "```svg" in result and "Static SVG label" in result
-    assert "<svg" in result
+    assert "```mermaid" in result and "Static SVG label" in result
+    assert "<svg" not in result
 
 
 def test_dynamic_svg_stays_visible_source():

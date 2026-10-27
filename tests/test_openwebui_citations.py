@@ -55,6 +55,42 @@ def test_resolved_archival_markers_become_openwebui_numeric_citations():
     }
 
 
+def test_raw_chatgpt_citation_markup_becomes_rich_citations():
+    content, sources = enrich_citations(
+        "Use this. citeturn133202search2turn133202search5", metadata()
+    )
+    assert content == "Use this. [1,2]"
+    assert [source["source"]["id"] for source in sources] == [
+        "turn133202search2",
+        "turn133202search5",
+    ]
+
+
+def test_content_reference_groups_resolve_raw_view_ids():
+    metadata_with_group = {
+        "content_references": [
+            {
+                "matched_text": "citeturn235995view2turn695205view6",
+                "items": [
+                    {
+                        "title": "Corporate Finance Class",
+                        "url": "https://pages.stern.nyu.edu/corpfin.html",
+                        "snippet": "Lectures and projects.",
+                    }
+                ],
+            }
+        ]
+    }
+    content, sources = enrich_citations(
+        "Study this. citeturn235995view2turn695205view6", metadata_with_group
+    )
+    assert content == "Study this. [1,2]"
+    assert [source["source"]["id"] for source in sources] == ["turn235995view2", "turn695205view6"]
+    assert all(
+        source["source"]["url"] == "https://pages.stern.nyu.edu/corpfin.html" for source in sources
+    )
+
+
 def test_unresolved_refs_remain_visible_and_resolved_refs_still_work():
     content, sources = enrich_citations(
         "Statement *(citation: turn133202search2, turn999search0)*.", metadata()

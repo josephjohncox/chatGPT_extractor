@@ -452,8 +452,8 @@ def markdown(node: Node) -> str:
         # Textual label rather than guessing what an unknown icon looks like.
         return "[" + plain(name).replace("[", "\\[").replace("]", "\\]") + "]"
     if node.tag == "svg":
-        # Open WebUI recognizes fenced SVG as an artifact/preview; raw inline SVG is shown as text.
-        return fence(safe_svg(node), "svg")
+        # Mermaid renders directly in chat, including inside collapsed historical activity.
+        return svg_to_mermaid(node)
     if node.tag == "b":
         text = inline(node)
         return "**" + text + "**" if text else ""
