@@ -1,6 +1,9 @@
 """Translate a small, static ChatGPT layout vocabulary; never evaluate JSX or JavaScript."""
 
+import ast
 import html
+import json
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -23,14 +26,27 @@ TAGS = {
     "table-row",
     "table-cell",
     "Link",
+    "Entity",
+    "Cite",
+    "svg",
+    "rect",
+    "path",
+    "g",
+    "b",
 }
-ROOTS = r"box|grid|row|text"
+ROOTS = r"box|grid|row|text|Entity|Cite"
 TOKEN = re.compile(
     r"""<(?P<close>/)?(?P<name>[A-Za-z][\w:-]*)(?P<attrs>(?:[^<>"']|"[^"]*"|'[^']*')*)>"""
 )
 ATTRIBUTE = re.compile(
     r"""\s+([A-Za-z][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*(-?\d+(?:\.\d+)?|true|false)\s*\}))?"""
 )
+REFERENCE_LIST = re.compile(
+    r"""\s+refs\s*=\s*\{\s*(\[(?:\s*"[^"]*"\s*(?:,\s*"[^"]*"\s*)*)?\])\s*\}"""
+)
+SVELTE_SVG = re.compile(r"(?is)(<svg\b[^>]*>)(.*?)</svg>")
+EACH_ITEMS = re.compile(r"(?s)\{#each\s+\[(.*?)\]\s+as\s+\w+\}")
+SVG_LABEL = re.compile(r"""(?:\b(?:t|l1|l2)\s*:\s*"([^"]*)")|(?:<text\b[^>]*>([^<{]+)</text>)""")
 CANDIDATE = re.compile(
     r"(?m)^ {0,3}(?:`{3,}|~{3,})[^\r\n]*(?:\r?\n|$)|`+|^(?: {4}|\t)[^\r\n]*(?:\r?\n|$)|(?<!\\)<(?:"
     + ROOTS
@@ -56,6 +72,19 @@ def attributes(raw: str) -> dict[str, str]:
     while pos < len(raw):
         if not raw[pos:].strip():
             break
+        refs = REFERENCE_LIST.match(raw, pos)
+        if refs is not None:
+            if "refs" in result:
+                raise UnsupportedLayout("Duplicate attributes are not supported")
+            try:
+                values = json.loads(refs.group(1))
+            except ValueError as exc:
+                raise UnsupportedLayout("Citation references must be literal strings") from exc
+            if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+                raise UnsupportedLayout("Citation references must be literal strings")
+            result["refs"] = "\u001f".join(values)
+            pos = refs.end()
+            continue
         match = ATTRIBUTE.match(raw, pos)
         if match is None:
             raise UnsupportedLayout("Only literal attributes are supported")
@@ -157,6 +186,158 @@ def table(rows: list[list[str]], headers: list[str]) -> str:
     )
 
 
+def citation_labels(node: Node) -> list[str]:
+    refs = node.attrs.get("refs", "").split("\u001f") if node.attrs.get("refs") else []
+    ref = node.attrs.get("ref")
+    if ref:
+        refs.append(ref)
+    if not refs or any(not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", value) for value in refs):
+        raise UnsupportedLayout("Citation references must be literal safe identifiers")
+    return refs
+
+
+def format_literal(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if not isinstance(value, float) or value.is_integer():
+            return str(int(value))
+    return str(value)
+
+
+def literal_each_items(raw: str) -> list[dict]:
+    # The supported form is a literal JS object array, not a general JS expression.
+    normalized = re.sub(r"([,{]\s*)([A-Za-z][\w-]*)\s*:", r'\1"\2":', raw)
+    try:
+        items = json.loads(normalized)
+    except ValueError as exc:
+        raise UnsupportedLayout("Svelte each data must be literal JSON-like objects") from exc
+    if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+        raise UnsupportedLayout("Svelte each data must be literal object rows")
+    return items
+
+
+def evaluate_loop_expression(expression: str, variable: str, item: dict) -> str:
+    expression = expression.strip()
+    direct = re.fullmatch(re.escape(variable) + r"\.([A-Za-z][\w-]*)", expression)
+    if direct:
+        value = item.get(direct.group(1))
+        if not isinstance(value, (str, int, float, bool)) or isinstance(value, bool):
+            raise UnsupportedLayout("Svelte loop property must be a literal scalar")
+        return format_literal(value)
+
+    def replace_property(match):
+        value = item.get(match.group(1))
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise UnsupportedLayout("Svelte arithmetic requires numeric literal properties")
+        return format_literal(value)
+
+    numeric = re.sub(re.escape(variable) + r"\.([A-Za-z][\w-]*)", replace_property, expression)
+    if not re.fullmatch(r"[0-9+*/(). \t-]+", numeric):
+        raise UnsupportedLayout("Unsupported Svelte expression")
+
+    def calculate(node):
+        if isinstance(node, ast.Expression):
+            return calculate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = calculate(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and isinstance(
+            node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)
+        ):
+            left, right = calculate(node.left), calculate(node.right)
+            return {
+                ast.Add: left + right,
+                ast.Sub: left - right,
+                ast.Mult: left * right,
+                ast.Div: left / right,
+            }[type(node.op)]
+        raise UnsupportedLayout("Unsupported Svelte numeric expression")
+
+    try:
+        value = calculate(ast.parse(numeric, mode="eval"))
+    except (ArithmeticError, SyntaxError, TypeError, ValueError) as exc:
+        raise UnsupportedLayout("Invalid Svelte numeric expression") from exc
+    if not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise UnsupportedLayout("Invalid Svelte numeric expression")
+    return format_literal(value)
+
+
+def expand_svelte_svg(block: str) -> str:
+    """Expand only literal `{#each [...] as x}` SVG loops; never execute Svelte/JS."""
+
+    def replace_svg(match):
+        opening, body = match.groups()
+        while (each := EACH_ITEMS.search(body)) is not None:
+            close = body.find("{/each}", each.end())
+            if close == -1:
+                raise UnsupportedLayout("Unclosed Svelte each block")
+            template = body[each.end() : close]
+            variable_match = re.search(r"as\s+(\w+)\}", each.group(0))
+            if variable_match is None:
+                raise UnsupportedLayout("Invalid Svelte each variable")
+            variable = variable_match.group(1)
+            expanded = []
+            for item in literal_each_items("[" + each.group(1) + "]"):
+
+                def replace_expression(expression):
+                    value = evaluate_loop_expression(expression.group(1), variable, item)
+                    attribute_value = (
+                        expression.start() > 0 and template[expression.start() - 1] == "="
+                    )
+                    if not attribute_value:
+                        return value
+                    if re.fullmatch(r"-?\d+(?:\.\d+)?", value):
+                        return "{" + value + "}"
+                    return json.dumps(value)
+
+                expanded.append(re.sub(r"\{([^{}]+)\}", replace_expression, template))
+            body = body[: each.start()] + "".join(expanded) + body[close + len("{/each}") :]
+        if re.search(r"\{[#/:]|\{\s*[A-Za-z_]", body):
+            raise UnsupportedLayout("SVG contains unsupported dynamic expressions")
+        return opening + body + "</svg>"
+
+    return SVELTE_SVG.sub(replace_svg, block)
+
+
+def safe_svg(node: Node) -> str:
+    allowed = {
+        "svg": {"viewBox", "width", "height", "fill", "stroke", "role", "aria-label"},
+        "rect": {
+            "x",
+            "y",
+            "width",
+            "height",
+            "rx",
+            "fill",
+            "fillOpacity",
+            "stroke",
+            "strokeOpacity",
+            "strokeWidth",
+        },
+        "path": {"d", "fill", "stroke", "strokeWidth", "strokeLinecap", "opacity"},
+        "g": {"fill", "stroke", "strokeWidth", "strokeLinecap", "opacity"},
+        "text": {"x", "y", "fill", "fontSize", "fontWeight", "textAnchor", "opacity"},
+    }
+    if node.tag not in allowed:
+        raise UnsupportedLayout("Unsupported SVG element")
+    attrs = " ".join(
+        f'{name}="{html.escape(value, quote=True)}"'
+        for name, value in node.attrs.items()
+        if name in allowed[node.tag]
+    )
+    content = "".join(
+        plain(child) if isinstance(child, str) else safe_svg(child) for child in node.children
+    )
+    if node.tag in {"rect", "path"}:
+        if content.strip():
+            raise UnsupportedLayout("SVG shape cannot have child content")
+        return f"<{node.tag} {attrs}/>"
+    return f"<{node.tag} {attrs}>{content}</{node.tag}>"
+
+
 def markdown(node: Node) -> str:
     nodes = [c for c in node.children if isinstance(c, Node)]
     if node.tag == "grid" and nodes and all(c.tag in {"box", "grid-item"} for c in nodes):
@@ -208,6 +389,18 @@ def markdown(node: Node) -> str:
         name = node.attrs.get("name", "icon")
         # Textual label rather than guessing what an unknown icon looks like.
         return "[" + plain(name).replace("[", "\\[").replace("]", "\\]") + "]"
+    if node.tag == "svg":
+        return safe_svg(node)
+    if node.tag == "b":
+        text = inline(node)
+        return "**" + text + "**" if text else ""
+    if node.tag == "Entity":
+        value = node.attrs.get("value")
+        if not isinstance(value, str) or not value.strip():
+            raise UnsupportedLayout("Entity needs a literal value")
+        return plain(value)
+    if node.tag == "Cite":
+        return "*(citation: " + ", ".join(citation_labels(node)) + ")*"
     if node.tag == "Link":
         label = plain(node.attrs.get("title") or inline(node) or safe_url(node.attrs.get("url")))
         label = re.sub(r"([\\`*_{}\[\]()!])", r"\\\1", label)
@@ -259,7 +452,7 @@ def static_html(node: Node) -> str:
         tag = "tr"
     elif node.tag == "table-cell":
         tag = "td"
-    elif node.tag in {"text", "caption", "badge", "icon", "Link"}:
+    elif node.tag in {"text", "caption", "badge", "icon", "Link", "Entity", "Cite", "b"}:
         tag = "a" if node.tag == "Link" else "span"
     if node.tag in {"title", "badge"} or node.attrs.get("weight") in {"bold", "semibold"}:
         styles.append("font-weight:700")
@@ -291,6 +484,8 @@ def static_html(node: Node) -> str:
         html.escape(html.unescape(c)) if isinstance(c, str) else static_html(c)
         for c in node.children
     )
+    if node.tag == "svg":
+        return safe_svg(node)
     if node.tag == "icon":
         content = html.escape(node.attrs.get("name", "icon"))
     if node.tag == "Link":
@@ -298,6 +493,10 @@ def static_html(node: Node) -> str:
             node.attrs.get("title") or inline(node) or safe_url(node.attrs.get("url"))
         )
         return f'<a href="{html.escape(safe_url(node.attrs.get("url")), quote=True)}" rel="noreferrer" style="{";".join(styles)}">{content}</a>'
+    if node.tag == "Entity":
+        return "<span>" + html.escape(markdown(node)) + "</span>"
+    if node.tag == "Cite":
+        return "<span>" + html.escape(markdown(node)) + "</span>"
     return f'<{tag} style="{";".join(styles)}">{content}</{tag}>'
 
 
@@ -335,8 +534,10 @@ def render_layouts(text: str, mode: str = "markdown") -> str:
         else:
             end = block_end(text, match.start())
             block = text[match.start() : end]
+            inline_component = False
             try:
-                root = parse(block)
+                root = parse(expand_svelte_svg(block))
+                inline_component = root.tag in {"Entity", "Cite"}
                 rendered = markdown(root)
                 if mode == "html":
                     document = (
@@ -350,7 +551,7 @@ def render_layouts(text: str, mode: str = "markdown") -> str:
                     rendered += "\n\n" + fence(document, "html")
             except UnsupportedLayout:
                 rendered = "Unsupported layout (original source):\n\n" + fence(block, "text")
-            output.append("\n\n" + rendered + "\n\n")
+            output.append(rendered if inline_component else "\n\n" + rendered + "\n\n")
         pos = end
     output.append(text[pos:])
     return "".join(output)

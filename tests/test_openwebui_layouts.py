@@ -24,6 +24,71 @@ PROSE = (
 MERMAID = '```mermaid\nflowchart LR\n  A["<box>literal label</box>"] --> B[Done]\n```\n'
 
 
+def test_entities_and_citations_become_readable_inline_text():
+    text = (
+        '<Entity category="people" value="Simon Willison"/>: empirical work '
+        '<Cite refs={["turn133202search2","turn133202search5"]}/>; '
+        '<Entity category="book" value="Category Theory in Context"/> '
+        '<Cite ref="turn411585search2"/>.'
+    )
+    assert render_layouts(text) == (
+        "Simon Willison: empirical work "
+        "*(citation: turn133202search2, turn133202search5)*; "
+        "Category Theory in Context *(citation: turn411585search2)*."
+    )
+
+
+@pytest.mark.parametrize(
+    "component",
+    [
+        '<Entity category="people"/>',
+        '<Cite refs={["turn good"]}/>',
+        "<Cite refs={dynamicRefs}/>",
+        "<Cite/>",
+    ],
+)
+def test_dynamic_or_incomplete_entity_and_citation_stay_visible_source(component):
+    result = render_layouts(component)
+    assert "Unsupported layout (original source):" in result
+    assert component in result
+
+
+def test_literal_svelte_svg_loop_becomes_accessible_diagram_text():
+    text = """<box border radius="lg" padding={3} gap={2}>
+  <svg viewBox="0 0 330 73" width="100%">
+    {#each [{x:5,t:"Original work"},{x:116,t:"Clear exposition"},{x:227,t:"Community use"}] as x}
+      <rect x={x.x} y="14" width="98" height="38"/>
+      <text x={x.x+49} y="37">{x.t}</text>
+    {/each}
+    <path d="M103 33 H115"/>
+    <text x="165" y="67">Feedback and collaboration improve the work</text>
+  </svg>
+</box>"""
+    result = render_layouts(text)
+    assert "<svg" in result and "<rect" in result and "<path" in result
+    for label in [
+        "Original work",
+        "Clear exposition",
+        "Community use",
+        "Feedback and collaboration improve the work",
+    ]:
+        assert label in result
+    assert "Unsupported layout" not in result
+    assert "{#each" not in result
+
+
+def test_static_svg_renders_inline_without_executing_code():
+    result = render_layouts("<box><svg><text>Static SVG label</text></svg></box>")
+    assert "<svg" in result and "Static SVG label" in result
+
+
+def test_dynamic_svg_stays_visible_source():
+    svg = "<box><svg>{#each dynamicItems as x}<text>{x.t}</text>{/each}</svg></box>"
+    result = render_layouts(svg)
+    assert "Unsupported layout (original source):" in result
+    assert svg in result
+
+
 def test_text_link_component_becomes_safe_markdown_link():
     text = (
         '<text color="secondary" size="xs">Reviewed: '

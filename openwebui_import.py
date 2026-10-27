@@ -24,6 +24,7 @@ from openwebui_artifacts import (
     update_existing_artifacts,
     upload_artifacts,
 )
+from openwebui_citations import enrich_citations
 from openwebui_layouts import render_layouts
 from openwebui_reasoning import render_reasoning
 from openwebui_replace import finish_replacement, prepare_replacement
@@ -111,8 +112,10 @@ def convert(detail: dict, layout_mode: str = "markdown", activity_mode: str = "c
         content = render_content(
             msg.get("content") or {}, layout_mode if role == "assistant" else "source"
         )
+        citation_sources: list[dict] = []
         if role == "assistant":
             content = render_reasoning(msg, content)
+            content, citation_sources = enrich_citations(content, metadata)
         activity = activity_kind(msg, content)
         if activity in {"tool_call", "tool_result"}:
             content = tool_record(msg, content, activity)
@@ -127,6 +130,8 @@ def convert(detail: dict, layout_mode: str = "markdown", activity_mode: str = "c
             "content": content,
             "timestamp": date if date is not None else created,
         }
+        if citation_sources:
+            message["sources"] = citation_sources
         if activity:
             message["chatgpt_activity_kind"] = activity
         if role in {"assistant", "tool"}:
