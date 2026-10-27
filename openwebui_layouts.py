@@ -5,6 +5,7 @@ import html
 import json
 import math
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 
 MAX_BLOCK = 128 * 1024
@@ -33,8 +34,9 @@ TAGS = {
     "path",
     "g",
     "b",
+    "AsyncImage",
 }
-ROOTS = r"box|grid|row|text|Entity|Cite"
+ROOTS = r"box|grid|row|text|Link|Entity|Cite|MapWidgetV2|AsyncImage"
 TOKEN = re.compile(
     r"""<(?P<close>/)?(?P<name>[A-Za-z][\w:-]*)(?P<attrs>(?:[^<>"']|"[^"]*"|'[^']*')*)>"""
 )
@@ -46,6 +48,7 @@ REFERENCE_LIST = re.compile(
 )
 SVELTE_SVG = re.compile(r"(?is)(<svg\b[^>]*>)(.*?)</svg>")
 EACH_ITEMS = re.compile(r"(?s)\{#each\s+\[(.*?)\]\s+as\s+\w+\}")
+MAP_WIDGET = re.compile(r"(?is)^<MapWidgetV2\b(?P<attrs>.*?)\s*/>$")
 SVG_LABEL = re.compile(r"""(?:\b(?:t|l1|l2)\s*:\s*"([^"]*)")|(?:<text\b[^>]*>([^<{]+)</text>)""")
 CANDIDATE = re.compile(
     r"(?m)^ {0,3}(?:`{3,}|~{3,})[^\r\n]*(?:\r?\n|$)|`+|^(?: {4}|\t)[^\r\n]*(?:\r?\n|$)|(?<!\\)<(?:"
@@ -194,6 +197,65 @@ def citation_labels(node: Node) -> list[str]:
     if not refs or any(not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", value) for value in refs):
         raise UnsupportedLayout("Citation references must be literal safe identifiers")
     return refs
+
+
+def quoted_bracket_value(text: str, start: int) -> tuple[str, int]:
+    if start >= len(text) or text[start] != "[":
+        raise UnsupportedLayout("Expected a literal array")
+    depth, quote, escape = 0, None, False
+    for index in range(start, len(text)):
+        char = text[index]
+        if quote:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1], index + 1
+    raise UnsupportedLayout("Unclosed literal array")
+
+
+def map_widget_markdown(block: str) -> str:
+    match = MAP_WIDGET.match(block.strip())
+    if match is None:
+        raise UnsupportedLayout("Invalid map widget")
+    attrs = match.group("attrs")
+    title_match = re.search(r'title="([^"]*)"', attrs)
+    points_marker = re.search(r"\bpoints\s*=\s*\{", attrs)
+    if points_marker is None:
+        raise UnsupportedLayout("Map widget needs literal points")
+    array, _ = quoted_bracket_value(attrs, points_marker.end())
+    try:
+        points = json.loads(array)
+    except ValueError as exc:
+        raise UnsupportedLayout("Map points must be literal JSON") from exc
+    if not isinstance(points, list) or not all(isinstance(point, dict) for point in points):
+        raise UnsupportedLayout("Map points must be object rows")
+    lines = ["### " + plain(title_match.group(1))] if title_match else ["### Map"]
+    for point in points:
+        name = point.get("name")
+        address = point.get("address")
+        if (
+            not isinstance(name, str)
+            or not isinstance(address, str)
+            or not name.strip()
+            or not address.strip()
+        ):
+            raise UnsupportedLayout("Map point needs literal name and address")
+        query = urllib.parse.quote(address, safe="")
+        lines.append(
+            f"- [{plain(name)}](<https://www.google.com/maps/search/?api=1&query={query}>) — {plain(address)}"
+        )
+    return "\n".join(lines)
 
 
 def format_literal(value) -> str:
@@ -599,19 +661,23 @@ def render_layouts(text: str, mode: str = "markdown") -> str:
             block = text[match.start() : end]
             inline_component = False
             try:
-                root = parse(expand_svelte_svg(block))
-                inline_component = root.tag in {"Entity", "Cite"}
-                rendered = markdown(root)
-                if mode == "html":
-                    document = (
-                        '<!doctype html><html><head><meta charset="utf-8">'
-                        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">"
-                        "<style>:root{color-scheme:light dark;--surface:light-dark(#f3f4f6,#25262a);--secondary:light-dark(#666,#bbb)}"
-                        "body{font-family:system-ui;padding:1rem}td{padding:.5rem}</style></head><body>"
-                        + static_html(root)
-                        + "</body></html>"
-                    )
-                    rendered += "\n\n" + fence(document, "html")
+                if block.lstrip().startswith("<MapWidgetV2"):
+                    # The source widget has no portable map renderer; use named location links.
+                    rendered = map_widget_markdown(block)
+                else:
+                    root = parse(expand_svelte_svg(block))
+                    inline_component = root.tag in {"Link", "Entity", "Cite", "AsyncImage"}
+                    rendered = markdown(root)
+                    if mode == "html":
+                        document = (
+                            '<!doctype html><html><head><meta charset="utf-8">'
+                            "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">"
+                            "<style>:root{color-scheme:light dark;--surface:light-dark(#f3f4f6,#25262a);--secondary:light-dark(#666,#bbb)}"
+                            "body{font-family:system-ui;padding:1rem}td{padding:.5rem}</style></head><body>"
+                            + static_html(root)
+                            + "</body></html>"
+                        )
+                        rendered += "\n\n" + fence(document, "html")
             except UnsupportedLayout:
                 rendered = "Unsupported layout (original source):\n\n" + fence(block, "text")
             output.append(rendered if inline_component else "\n\n" + rendered + "\n\n")

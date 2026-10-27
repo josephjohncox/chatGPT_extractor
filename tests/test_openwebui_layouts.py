@@ -27,14 +27,14 @@ MERMAID = '```mermaid\nflowchart LR\n  A["<box>literal label</box>"] --> B[Done]
 def test_entities_and_citations_become_readable_inline_text():
     text = (
         '<Entity category="people" value="Simon Willison"/>: empirical work '
-        '<Cite refs={["turn133202search2","turn133202search5"]}/>; '
+        '<Cite refs={["turn1001search2","turn1001search5"]}/>; '
         '<Entity category="book" value="Category Theory in Context"/> '
-        '<Cite ref="turn411585search2"/>.'
+        '<Cite ref="turn4004search2"/>.'
     )
     assert render_layouts(text) == (
         "Simon Willison: empirical work "
-        "*(citation: turn133202search2, turn133202search5)*; "
-        "Category Theory in Context *(citation: turn411585search2)*."
+        "*(citation: turn1001search2, turn1001search5)*; "
+        "Category Theory in Context *(citation: turn4004search2)*."
     )
 
 
@@ -91,6 +91,36 @@ def test_dynamic_svg_stays_visible_source():
     assert svg in result
 
 
+def test_map_widget_becomes_portable_location_links():
+    text = (
+        '<MapWidgetV2 title="Bay Area research communities" '
+        'points={[{"id":"topos","name":"Topos Institute","address":"2140 Shattuck Ave, Berkeley, CA","icon":"📐"},'
+        '{"id":"pwl","name":"Papers We Love","address":"71 Stevenson St, San Francisco, CA","icon":"📚"}]} '
+        'carousel={{visibility:"hidden"}}/>'
+    )
+    result = render_layouts(text)
+    assert "### Bay Area research communities" in result
+    assert (
+        "[Topos Institute](<https://www.google.com/maps/search/?api=1&query=2140%20Shattuck%20Ave%2C%20Berkeley%2C%20CA>)"
+        in result
+    )
+    assert "[Papers We Love]" in result
+    assert "MapWidgetV2" not in result
+
+
+@pytest.mark.parametrize(
+    "widget",
+    [
+        '<MapWidgetV2 title="Map" points={dynamicPoints}/>',
+        '<MapWidgetV2 points={[{"name":"Missing address"}]}/>',
+    ],
+)
+def test_dynamic_or_incomplete_map_stays_visible_source(widget):
+    result = render_layouts(widget)
+    assert "Unsupported layout (original source):" in result
+    assert widget in result
+
+
 def test_text_link_component_becomes_safe_markdown_link():
     text = (
         '<text color="secondary" size="xs">Reviewed: '
@@ -108,6 +138,14 @@ def test_text_link_component_becomes_safe_markdown_link():
         in html_result
     )
     assert 'rel="noreferrer"' in html_result
+
+
+def test_standalone_and_table_links_become_markdown_links():
+    assert render_layouts('Before <Link url="https://example.test" title="Example"/> after') == (
+        "Before [Example](<https://example.test>) after"
+    )
+    table = '| <Link url="https://example.test/a" title="One"/> | text |'
+    assert "[One](<https://example.test/a>)" in render_layouts(table)
 
 
 @pytest.mark.parametrize(
