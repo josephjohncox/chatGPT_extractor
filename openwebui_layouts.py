@@ -302,6 +302,68 @@ def expand_svelte_svg(block: str) -> str:
     return SVELTE_SVG.sub(replace_svg, block)
 
 
+def numeric_attr(node: Node, name: str) -> float | None:
+    value = node.attrs.get(name)
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def svg_to_mermaid(node: Node) -> str:
+    labels: list[tuple[str, float | None, float | None]] = []
+    paths: list[str] = []
+
+    def visit(item: Node):
+        if item.tag == "text":
+            label = "".join(
+                child if isinstance(child, str) else inline(child) for child in item.children
+            ).strip()
+            if label:
+                labels.append((label, numeric_attr(item, "x"), numeric_attr(item, "y")))
+        if item.tag == "path" and isinstance(item.attrs.get("d"), str):
+            paths.append(item.attrs["d"])
+        for child in item.children:
+            if isinstance(child, Node):
+                visit(child)
+
+    visit(node)
+    if not labels:
+        raise UnsupportedLayout("SVG has no readable text labels")
+
+    def quoted(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+    lines = ["flowchart TB"] + [
+        f'  N{i}["{quoted(label)}"]' for i, (label, _, _) in enumerate(labels, 1)
+    ]
+    edges = set()
+    segment = re.compile(
+        r"M\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*(?:L\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)|H\s*(-?\d+(?:\.\d+)?)|V\s*(-?\d+(?:\.\d+)?))"
+    )
+
+    def closest(x: float, y: float) -> int | None:
+        candidates = [
+            (i, (lx - x) ** 2 + (ly - y) ** 2)
+            for i, (_, lx, ly) in enumerate(labels, 1)
+            if lx is not None and ly is not None
+        ]
+        return min(candidates, key=lambda item: item[1])[0] if candidates else None
+
+    for data in paths:
+        match = segment.search(data)
+        if match is None:
+            continue
+        x1, y1 = float(match.group(1)), float(match.group(2))
+        x2 = float(match.group(3) or match.group(5) or x1)
+        y2 = float(match.group(4) or match.group(6) or y1)
+        source, target = closest(x1, y1), closest(x2, y2)
+        if source is not None and target is not None and source != target:
+            edges.add((source, target))
+    lines.extend(f"  N{source} --> N{target}" for source, target in sorted(edges))
+    return fence("\n".join(lines), "mermaid")
+
+
 def safe_svg(node: Node) -> str:
     allowed = {
         "svg": {"viewBox", "width", "height", "fill", "stroke", "role", "aria-label"},
@@ -390,7 +452,8 @@ def markdown(node: Node) -> str:
         # Textual label rather than guessing what an unknown icon looks like.
         return "[" + plain(name).replace("[", "\\[").replace("]", "\\]") + "]"
     if node.tag == "svg":
-        return safe_svg(node)
+        # Open WebUI recognizes fenced SVG as an artifact/preview; raw inline SVG is shown as text.
+        return fence(safe_svg(node), "svg")
     if node.tag == "b":
         text = inline(node)
         return "**" + text + "**" if text else ""
