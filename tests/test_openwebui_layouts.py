@@ -140,6 +140,21 @@ def test_text_link_component_becomes_safe_markdown_link():
     assert 'rel="noreferrer"' in html_result
 
 
+def test_inline_bold_link_stays_a_single_markdown_span():
+    text = '<box>**<Link url="https://github.com/example/project" title="Project"/>**\n\nDescription</box>'
+    assert (
+        render_layouts(text).strip()
+        == "**[Project](<https://github.com/example/project>)**\n\nDescription"
+    )
+
+
+def test_memory_cite_marker_is_removed_and_async_image_becomes_markdown_image():
+    assert render_layouts("Before <MemoryCite/> after") == "Before  after"
+    assert render_layouts('<AsyncImage url="https://example.test/image.png" alt="Diagram"/>') == (
+        "![Diagram](<https://example.test/image.png>)"
+    )
+
+
 def test_standalone_and_table_links_become_markdown_links():
     assert render_layouts('Before <Link url="https://example.test" title="Example"/> after') == (
         "Before [Example](<https://example.test>) after"

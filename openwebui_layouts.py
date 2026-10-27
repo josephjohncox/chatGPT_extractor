@@ -35,8 +35,9 @@ TAGS = {
     "g",
     "b",
     "AsyncImage",
+    "MemoryCite",
 }
-ROOTS = r"box|grid|row|text|Link|Entity|Cite|MapWidgetV2|AsyncImage"
+ROOTS = r"box|grid|row|text|Link|Entity|Cite|MapWidgetV2|AsyncImage|MemoryCite"
 TOKEN = re.compile(
     r"""<(?P<close>/)?(?P<name>[A-Za-z][\w:-]*)(?P<attrs>(?:[^<>"']|"[^"]*"|'[^']*')*)>"""
 )
@@ -519,6 +520,13 @@ def markdown(node: Node) -> str:
     if node.tag == "b":
         text = inline(node)
         return "**" + text + "**" if text else ""
+    if node.tag == "MemoryCite":
+        # Empty ChatGPT presentation marker; no resolvable source is attached to it.
+        return ""
+    if node.tag == "AsyncImage":
+        url = safe_url(node.attrs.get("url") or node.attrs.get("src"))
+        alt = plain(node.attrs.get("alt") or node.attrs.get("title") or "Image")
+        return f"![{alt}](<{url}>)"
     if node.tag == "Entity":
         value = node.attrs.get("value")
         if not isinstance(value, str) or not value.strip():
@@ -535,11 +543,40 @@ def markdown(node: Node) -> str:
         if node.tag in {"title", "badge"} or node.attrs.get("weight") in {"bold", "semibold"}:
             return "**" + text + "**" if text else ""
         return text
-    parts = [plain(c).strip() if isinstance(c, str) else markdown(c) for c in node.children]
-    parts = [part for part in parts if part]
-    return (" · " if node.tag == "row" and all("\n" not in p for p in parts) else "\n\n").join(
-        parts
-    )
+    inline_tags = {
+        "Link",
+        "Entity",
+        "Cite",
+        "MemoryCite",
+        "AsyncImage",
+        "b",
+        "text",
+        "caption",
+        "title",
+        "badge",
+        "icon",
+    }
+    parts = []
+    inline_parts = []
+    for child in node.children:
+        if isinstance(child, str):
+            inline_parts.append(plain(child))
+        elif child.tag in inline_tags:
+            inline_parts.append(markdown(child))
+        else:
+            value = "".join(inline_parts).strip()
+            if value:
+                parts.append(value)
+            inline_parts = []
+            value = markdown(child)
+            if value:
+                parts.append(value)
+    value = "".join(inline_parts).strip()
+    if value:
+        parts.append(value)
+    return (
+        " · " if node.tag == "row" and all("\n" not in part for part in parts) else "\n\n"
+    ).join(parts)
 
 
 def integer(value: str | None, default: int, maximum: int) -> int:
@@ -577,7 +614,18 @@ def static_html(node: Node) -> str:
         tag = "tr"
     elif node.tag == "table-cell":
         tag = "td"
-    elif node.tag in {"text", "caption", "badge", "icon", "Link", "Entity", "Cite", "b"}:
+    elif node.tag in {
+        "text",
+        "caption",
+        "badge",
+        "icon",
+        "Link",
+        "Entity",
+        "Cite",
+        "b",
+        "AsyncImage",
+        "MemoryCite",
+    }:
         tag = "a" if node.tag == "Link" else "span"
     if node.tag in {"title", "badge"} or node.attrs.get("weight") in {"bold", "semibold"}:
         styles.append("font-weight:700")
@@ -622,6 +670,8 @@ def static_html(node: Node) -> str:
         return "<span>" + html.escape(markdown(node)) + "</span>"
     if node.tag == "Cite":
         return "<span>" + html.escape(markdown(node)) + "</span>"
+    if node.tag in {"AsyncImage", "MemoryCite"}:
+        return html.escape(markdown(node))
     return f'<{tag} style="{";".join(styles)}">{content}</{tag}>'
 
 
@@ -666,7 +716,13 @@ def render_layouts(text: str, mode: str = "markdown") -> str:
                     rendered = map_widget_markdown(block)
                 else:
                     root = parse(expand_svelte_svg(block))
-                    inline_component = root.tag in {"Link", "Entity", "Cite", "AsyncImage"}
+                    inline_component = root.tag in {
+                        "Link",
+                        "Entity",
+                        "Cite",
+                        "AsyncImage",
+                        "MemoryCite",
+                    }
                     rendered = markdown(root)
                     if mode == "html":
                         document = (
