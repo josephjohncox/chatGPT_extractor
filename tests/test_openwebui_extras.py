@@ -91,12 +91,17 @@ def test_system_preserves_settings_and_is_idempotent():
     assert settings == {"ui": {"theme": "dark"}, "other": {"keep": True}}
 
 
-def test_system_refuses_overwrite():
+def test_personal_system_prompt_updates_without_touching_global_or_model_config():
     session = Mock()
-    session.request.return_value = response({"ui": {"system": "Existing instructions"}})
-    with pytest.raises(ValueError, match="refusing"):
-        apply_system_prompt(session, "https://example.test", "New instructions")
-    assert session.request.call_count == 1
+    before = {"ui": {"system": "Existing instructions", "theme": "dark"}}
+    after = {"ui": {"system": "New instructions", "theme": "dark"}}
+    session.request.side_effect = [response(before), response(after)]
+    apply_system_prompt(session, "https://example.test", "New instructions")
+    assert session.request.call_args.kwargs["json"] == after
+    assert [call.args for call in session.request.call_args_list] == [
+        ("GET", "https://example.test/api/v1/users/user/settings"),
+        ("POST", "https://example.test/api/v1/users/user/settings/update"),
+    ]
 
 
 def test_system_permission_failure_detected():

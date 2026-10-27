@@ -43,17 +43,26 @@ To obtain an official export, use ChatGPT **Settings → Data controls → Expor
 
 ## Upload an archive to Open WebUI
 
-Preview a raw JSON export without making network requests:
+Preview all supported data without making network requests, or inspect the full CLI help:
 
 ```sh
-uv run python openwebui_import.py chatgpt_export_oct_2026
+uv run python openwebui_import.py chatgpt_export_oct_2026 --all
+uv run python openwebui_import.py --help
 ```
 
-Add `--upload` after setting `OPENWEBUI_URL` and `OPENWEBUI_TOKEN` to import chats with their original dates and visible branches. Start with `--upload --limit 1`. A local journal lets later runs skip completed uploads. Attachment binaries and project folders are not transferred.
+`--all` selects chats, project folders, memories, your personal account system prompt, available artifact files, Canvas histories, and editable text/Markdown Canvas Notes. Add `--upload` to write them to Open WebUI. This updates your personal system prompt from the exported instructions, not global server or shared model prompts. Use `--all --instructions prompt` to save a reusable prompt instead. Omit `--all` for chats only. Missing memory/instruction files stop validation; missing/partial artifacts are reported. General settings are not included.
 
-Use `--include-memories` to import saved memories and `--instructions prompt` to create a reusable custom-instructions prompt. Use `--instructions system` instead to apply the instructions as your account's system prompt; it refuses to overwrite a different existing prompt. Add `--only-extras` to skip chats. Memory imports invoke the server's embedding service and receive new timestamps.
+Add `--upload` after setting `OPENWEBUI_URL` and `OPENWEBUI_TOKEN` to import chats with their original dates and visible branches. Start with `--upload --limit 1`. A local journal lets later runs skip completed uploads. Add `--project-folders` to create folders for ChatGPT projects and assign chats during import. Unique exact-name folders in your account are reused without changing their settings; ambiguous or conflicting matches stop rather than create duplicates. Use `--include-artifacts` for downloadable files and histories, or `--canvas-notes` for those plus editable Notes; both are included in `--all`. Files are checksum-verified and uploaded without extraction/embedding. **`--limit` limits chats only, not files or extras.** Moving previously imported chats requires `--move-existing-project-chats`, which permits Open WebUI to change update dates and clear pinned/archive state.
 
-See [Open WebUI import](docs/openwebui-import.md) for credentials, timestamp handling, and recovery after an interrupted upload.
+Use `--include-memories` to import saved memories and `--instructions prompt` to create a reusable custom-instructions prompt. Use `--instructions system` to update your personal account system prompt, replacing a different existing personal prompt while retaining other settings. This is the default with `--all`. Add `--only-extras` to skip chats. Memory imports invoke the server's embedding service and receive new timestamps.
+
+To recreate earlier imports with original dates plus all selected features, use `--all --replace-imported-chats --upload` with the **same journal**. This deletes only journaled chats whose owner and source IDs are verified, then re-imports them. It discards server-only edits/shares and changes server chat IDs; back up Open WebUI first. Files, Notes, memories, prompts, and unrelated chats are not cleared. `--all` alone never enables deletion. Alternatively, `--update-existing-artifacts` adds links without deleting chats but changes update dates.
+
+Recognised static layout tags in assistant messages become readable Markdown by default; Mermaid and other existing code blocks are preserved. Use `--layout-rendering html` to also generate static HTML artifact previews, or `--layout-rendering source` to retain raw markup. Unsupported widgets remain explicitly labelled source, and original message data is always retained.
+
+Open WebUI can search imported chat titles and messages through sidebar Search. Tool-capable models can use `search_chats` and `view_chat` with Native Function Calling and Builtin Tools enabled.
+
+See [Open WebUI import](docs/openwebui-import.md) for search setup, folder migration, credentials, timestamp handling, and recovery after an interrupted upload.
 
 ## Set up a live web snapshot
 
