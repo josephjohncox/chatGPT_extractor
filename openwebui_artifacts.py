@@ -296,6 +296,10 @@ def enrich_chat(chat: dict, links: list[dict]) -> dict:
     messages = history.get("messages") or {}
     source = result.get("chatgpt_source") or {}
     mapping = source.get("mapping") or {}
+    grouped_targets: dict[str, list[str]] = {}
+    for node_id, message in messages.items():
+        for source_id in message.get("chatgpt_source_node_ids", []):
+            grouped_targets.setdefault(source_id, []).append(node_id)
     for link in links:
         key = link["asset_id"]
         if key in existing:
@@ -312,14 +316,25 @@ def enrich_chat(chat: dict, links: list[dict]) -> dict:
                 ),
                 None,
             )
+        targets = (
+            ([target] if target in messages else grouped_targets.get(target, []))
+            if isinstance(target, str)
+            else []
+        )
         seen = set()
-        while target not in messages and target in mapping and target not in seen:
+        while not targets and target in mapping and target not in seen:
             seen.add(target)
             target = mapping[target].get("parent")
-        if target not in messages:
+            targets = (
+                ([target] if target in messages else grouped_targets.get(target, []))
+                if isinstance(target, str)
+                else []
+            )
+        if not targets:
             target = history.get("currentId")
-        if target not in messages:
-            raise ValueError("No visible message available for artifact links")
+            if not isinstance(target, str) or target not in messages:
+                raise ValueError("No visible message available for artifact links")
+            targets = [target]
         label = escape_label(link["name"])
         partial = " **[Partial reconstruction]**" if link["outcome"] == "partial" else ""
         text = f"\n\nImported artifact{partial}: [{label}](<{link['url']}>)"
@@ -327,13 +342,22 @@ def enrich_chat(chat: dict, links: list[dict]) -> dict:
             text += f" · [Canvas history](<{link['history_url']}>)"
         if link.get("note_url"):
             text += f" · [Editable Note](<{link['note_url']}>)"
-        content = messages[target].get("content", "")
-        locator = link["reference"].get("locator")
-        # Rewrite only a matching Markdown link destination, in its source message.
-        if link["reference"].get("kind") == "sandbox" and isinstance(locator, str):
-            old = locator if locator.startswith("sandbox:") else "sandbox:" + locator
-            content = content.replace("](" + old + ")", "](<" + link["url"] + ">)")
-        messages[target]["content"] = content + text
+        for target in targets:
+            content = messages[target].get("content", "")
+            locator = link["reference"].get("locator")
+            # Rewrite only the answer, not documentary JSON inside archived activity.
+            if link["reference"].get("kind") == "sandbox" and isinstance(locator, str):
+                old = locator if locator.startswith("sandbox:") else "sandbox:" + locator
+                if messages[target].get("chatgpt_activity"):
+                    prefix, separator, answer = content.partition("</details>")
+                    content = (
+                        prefix
+                        + separator
+                        + answer.replace("](" + old + ")", "](<" + link["url"] + ">)")
+                    )
+                else:
+                    content = content.replace("](" + old + ")", "](<" + link["url"] + ">)")
+            messages[target]["content"] = content + text
         existing[key] = link
     if links:
         result["chatgpt_artifacts"] = list(existing.values())

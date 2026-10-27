@@ -137,18 +137,58 @@ uv run python openwebui_import.py chatgpt_export_oct_2026 --all
 uv run python openwebui_import.py chatgpt_export_oct_2026 \
   --all --layout-rendering html
 
-# Keep all message markup unchanged instead:
+# Keep layout markup unchanged instead (reasoning conversion still applies):
 uv run python openwebui_import.py chatgpt_export_oct_2026 \
   --all --layout-rendering source
 ```
 
 HTML mode keeps the inline Markdown fallback and adds a standalone HTML/CSS artifact block. It approximates cards, grid columns, gaps, padding, typography, and colours; it is not a copy of ChatGPT's component renderer. Only fixed generated HTML/CSS and escaped text are emitted. No JavaScript, arbitrary attribute forwarding, or network resources are added. The HTML contains a restrictive content-security policy. Actual preview availability depends on the Open WebUI client/settings.
 
-Existing fenced code blocks (including Mermaid), inline code, indented code, user messages, and structured code content are not reinterpreted. Valid `mermaid` fences remain available to Open WebUI's native diagram renderer; the importer does not repair invalid Mermaid syntax or execute diagrams server-side. Ordinary prose around converted layouts is retained.
+Existing fenced code blocks (including Mermaid), inline code, indented code, user messages, and structured code content are not reinterpreted. Valid assistant `mermaid` fences remain available to Open WebUI's native diagram renderer; the importer does not repair invalid Mermaid syntax or execute diagrams server-side. Ordinary prose around converted layouts is retained.
 
 Unknown components, event handlers, dynamic JSX attribute expressions, malformed blocks, and over-limit trees become explicitly labelled source-code blocks. Maps, custom citation widgets, React components, SVG embedded inside these layouts, and other unknown components are not silently guessed. Limits are 128 KiB per layout scan, 2,048 nodes, and nesting depth 32. Original message content remains in `chat.chatgpt_source` in every mode.
 
 Rendering choices affect the import digest. Existing chats with old/raw rendering are not silently overwritten. To apply the new rendering while retaining source dates, back up Open WebUI, then rerun with the same journal and `--all --replace-imported-chats --upload` (optionally add `--layout-rendering html`). This replacement discards server-only edits and changes server chat IDs, as described above. Do not change rendering options during an incomplete replacement recovery.
+
+## Historical tool activity and thinking blocks
+
+By default, the importer renders **one visible assistant bubble per completed turn**, rather than a bubble for every historical tool call, tool result, thinking summary, recap, and commentary node. This is `--activity-rendering compact`, and it is enabled with `--all`.
+
+```sh
+# Default: compact historical activity into the answer it led to:
+uv run python openwebui_import.py chatgpt_export_oct_2026 --all
+
+# Diagnostic/forensic view: keep one bubble per exported source node:
+uv run python openwebui_import.py chatgpt_export_oct_2026 \
+  --all --activity-rendering nodes
+```
+
+In compact mode, each branch's activity records appear in a collapsed **Imported activity** section immediately above the branch's final answer. Tool calls and tool results are marked historical and are never executable Open WebUI tool calls: the importer does not create `tool_calls`, `output`, approval actions, or live MCP invocations. Tool JSON is displayed as escaped code with a 64 KiB preview limit; the complete original record remains in `chatgpt_source`.
+
+Explicit fenced Mermaid blocks inside historical tool records, plus Confluence `macro-diagram` bodies whose embedded syntax is explicitly `Mermaid`, receive an additional collapsed **Historical Mermaid diagram** preview. This is a visual archival rendering, not a replay of the tool action or macro. Arbitrary HTML, JavaScript, malformed macro metadata, non-Mermaid diagram types, and oversized diagrams stay code/source only. A branch with no final answer gets an explicit incomplete-turn marker. Sibling branches retain their own activity and do not inherit each other's calls/results.
+
+Hidden source nodes remain only in `chatgpt_source`. The collapsed activity metadata records the represented source node IDs, kinds, and timestamps. Artifact links from a folded source node resolve to the answer(s) for that branch, not to a phantom tool bubble. `--activity-rendering nodes` is available for inspection, but it still represents historical calls as inert collapsible records rather than live tool activity.
+
+Reasoning conversion is enabled in both activity modes, including with `--all`. ChatGPT's exported `thoughts` and `reasoning_recap` records are rendered as Open WebUI saved-history blocks:
+
+```html
+<details type="reasoning" done="true">
+<summary>Imported ChatGPT reasoning summary</summary>
+
+> The reasoning summary text actually present in the export.
+
+</details>
+```
+
+This uses Open WebUI's stored `<details>` format rather than relying on its live-stream `<think>` parser to run during import. Thought summaries and their available content are extracted from structured records, not displayed as JSON answers. Recaps retain cancellation labels; a finite nonnegative `finished_duration_sec` becomes the duration attribute when present. Missing durations are not invented.
+
+Assistant text explicitly marked as an analysis channel, thinking preamble, or active reasoning is also folded. Ordinary commentary and final answers are not inferred to be reasoning just because they occur in the same turn. Tool invocations/results remain separately labelled historical activity, never reasoning unless their own exported record is explicitly a reasoning item. Complete inline `<think>`, `<thinking>`, `<reason>`, `<reasoning>`, `<thought>`, and `<|begin_of_thought|>` pairs are converted outside Markdown code. Fenced/inline/indented examples and structured code content remain unchanged; unmatched tags are not repaired. User messages are not transformed.
+
+Separate source message IDs, ancestry, branches, timestamps, and the selected final answer are preserved in `chatgpt_source`. Compact display deliberately folds intermediary nodes into their branch's answer bubble; node mode exposes them individually. Hidden messages remain only in the original `chatgpt_source`; the importer does not reveal or reconstruct unavailable internal reasoning. The displayed text is the summary/content supplied by the export, not a claim of complete model thought traces.
+
+No provider-native `output` array, encrypted reasoning state, or Responses API reasoning IDs are invented. Subsequent model replay depends on Open WebUI and the provider; this is an archival/UI conversion, not restoration of a provider's private session state. No global/model reasoning settings are changed. `--layout-rendering source` disables layout conversion only, not reasoning conversion.
+
+For already-imported chats, activity/reasoning mode changes the rendering digest. Use the same journal with `--replace-imported-chats` to apply it with source dates, after backing up any server-only changes. The activity defaults will make the replacement payload differ from previous imports, allowing an explicit replacement run; do not change options during an incomplete replacement recovery. See the replacement limits above.
 
 ## Search imported chats
 

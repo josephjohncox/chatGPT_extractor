@@ -60,6 +60,8 @@ To recreate earlier imports with original dates plus all selected features, use 
 
 Recognised static layout tags in assistant messages become readable Markdown by default; Mermaid and other existing code blocks are preserved. Use `--layout-rendering html` to also generate static HTML artifact previews, or `--layout-rendering source` to retain raw markup. Unsupported widgets remain explicitly labelled source, and original message data is always retained.
 
+By default, historical tool calls/results, commentary, and reasoning nodes fold into a collapsed **Imported activity** section above each branch's final answer—rather than appearing as raw JSON bubbles. They remain inert records and are never re-executed. Use `--activity-rendering nodes` for one bubble per source node. Exported ChatGPT reasoning summaries/recaps and explicitly marked thinking text become collapsible reasoning blocks. Source branches and raw source JSON remain available; no missing internal reasoning or provider session state is invented.
+
 Open WebUI can search imported chat titles and messages through sidebar Search. Tool-capable models can use `search_chats` and `view_chat` with Native Function Calling and Builtin Tools enabled.
 
 See [Open WebUI import](docs/openwebui-import.md) for search setup, folder migration, credentials, timestamp handling, and recovery after an interrupted upload.

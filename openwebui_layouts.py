@@ -22,8 +22,9 @@ TAGS = {
     "table",
     "table-row",
     "table-cell",
+    "Link",
 }
-ROOTS = r"box|grid|row"
+ROOTS = r"box|grid|row|text"
 TOKEN = re.compile(
     r"""<(?P<close>/)?(?P<name>[A-Za-z][\w:-]*)(?P<attrs>(?:[^<>"']|"[^"]*"|'[^']*')*)>"""
 )
@@ -132,6 +133,12 @@ def plain(value: str) -> str:
     return html.unescape(value).replace("<", "&lt;").replace(">", "&gt;")
 
 
+def safe_url(value: str | None) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"https?://[^\s<>]+", value):
+        raise UnsupportedLayout("Links must use literal http(s) URLs")
+    return value
+
+
 def inline(node: Node) -> str:
     return "".join(plain(c) if isinstance(c, str) else markdown(c) for c in node.children).strip()
 
@@ -201,6 +208,10 @@ def markdown(node: Node) -> str:
         name = node.attrs.get("name", "icon")
         # Textual label rather than guessing what an unknown icon looks like.
         return "[" + plain(name).replace("[", "\\[").replace("]", "\\]") + "]"
+    if node.tag == "Link":
+        label = plain(node.attrs.get("title") or inline(node) or safe_url(node.attrs.get("url")))
+        label = re.sub(r"([\\`*_{}\[\]()!])", r"\\\1", label)
+        return "[" + label + "](<" + safe_url(node.attrs.get("url")) + ">)"
     if node.tag in {"text", "caption", "title", "badge", "table-cell"}:
         text = inline(node)
         if node.tag in {"title", "badge"} or node.attrs.get("weight") in {"bold", "semibold"}:
@@ -214,9 +225,12 @@ def markdown(node: Node) -> str:
 
 
 def integer(value: str | None, default: int, maximum: int) -> int:
-    if value is not None and re.fullmatch(r"\d{1,3}", value):
+    if value is None or not re.fullmatch(r"\d{1,3}", value):
+        return default
+    try:
         return min(int(value), maximum)
-    return default
+    except ValueError:
+        return default
 
 
 def static_html(node: Node) -> str:
@@ -245,8 +259,8 @@ def static_html(node: Node) -> str:
         tag = "tr"
     elif node.tag == "table-cell":
         tag = "td"
-    elif node.tag in {"text", "caption", "badge", "icon"}:
-        tag = "span"
+    elif node.tag in {"text", "caption", "badge", "icon", "Link"}:
+        tag = "a" if node.tag == "Link" else "span"
     if node.tag in {"title", "badge"} or node.attrs.get("weight") in {"bold", "semibold"}:
         styles.append("font-weight:700")
     if node.attrs.get("tabularNums") == "true":
@@ -279,6 +293,11 @@ def static_html(node: Node) -> str:
     )
     if node.tag == "icon":
         content = html.escape(node.attrs.get("name", "icon"))
+    if node.tag == "Link":
+        content = html.escape(
+            node.attrs.get("title") or inline(node) or safe_url(node.attrs.get("url"))
+        )
+        return f'<a href="{html.escape(safe_url(node.attrs.get("url")), quote=True)}" rel="noreferrer" style="{";".join(styles)}">{content}</a>'
     return f'<{tag} style="{";".join(styles)}">{content}</{tag}>'
 
 

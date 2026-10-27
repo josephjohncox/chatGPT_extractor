@@ -24,6 +24,43 @@ PROSE = (
 MERMAID = '```mermaid\nflowchart LR\n  A["<box>literal label</box>"] --> B[Done]\n```\n'
 
 
+def test_text_link_component_becomes_safe_markdown_link():
+    text = (
+        '<text color="secondary" size="xs">Reviewed: '
+        '<Link url="https://hadrian-automation.atlassian.net/wiki/spaces/EPD/pages/3791816594" '
+        'title="FSpec: Generic Requisitions"/> · Michael Gallagher · October 19, 2026</text>'
+    )
+    assert render_layouts(text).strip() == (
+        "Reviewed: [FSpec: Generic Requisitions]("
+        "<https://hadrian-automation.atlassian.net/wiki/spaces/EPD/pages/3791816594>) "
+        "· Michael Gallagher · October 19, 2026"
+    )
+    html_result = render_layouts(text, "html")
+    assert (
+        'href="https://hadrian-automation.atlassian.net/wiki/spaces/EPD/pages/3791816594"'
+        in html_result
+    )
+    assert 'rel="noreferrer"' in html_result
+
+
+@pytest.mark.parametrize(
+    "url", ["javascript:alert(1)", "file:///etc/passwd", "//example.test", "https://bad example"]
+)
+def test_unsafe_layout_link_stays_visible_source(url):
+    text = f'<box><Link url="{url}" title="Example"/></box>'
+    result = render_layouts(text)
+    assert "Unsupported layout (original source):" in result
+    assert text in result
+
+
+def test_link_title_cannot_inject_an_extra_markdown_destination():
+    text = '<text><Link url="https://safe.example" title="x](https://evil.example)"/></text>'
+    result = render_layouts(text)
+    assert result.count("](<") == 1
+    assert "x\\]\\(" in result
+    assert "<https://safe.example>" in result
+
+
 def test_user_example_becomes_readable_table_with_prose_unchanged():
     result = render_layouts(EXAMPLE + "\n" + PROSE)
     assert "| Measure | Value |" in result

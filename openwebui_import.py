@@ -15,6 +15,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from openwebui_activity import activity_kind, compact_history, tool_record
 from openwebui_artifacts import (
     ArtifactPlan,
     chat_asset_links,
@@ -24,6 +25,7 @@ from openwebui_artifacts import (
     upload_artifacts,
 )
 from openwebui_layouts import render_layouts
+from openwebui_reasoning import render_reasoning
 from openwebui_replace import finish_replacement, prepare_replacement
 
 
@@ -63,8 +65,10 @@ def render_content(content: dict, layout_mode: str = "markdown") -> str:
     return text if content.get("content_type") == "code" else render_layouts(text, layout_mode)
 
 
-def convert(detail: dict, layout_mode: str = "markdown") -> dict:
+def convert(detail: dict, layout_mode: str = "markdown", activity_mode: str = "compact") -> dict:
     """Build an import form. Raw source remains separate from executable model settings."""
+    if activity_mode not in {"compact", "nodes"}:
+        raise ValueError("Unknown activity rendering mode")
     ident = detail.get("conversation_id") or detail.get("id")
     mapping = detail.get("mapping")
     if not isinstance(ident, str) or not ident or not isinstance(mapping, dict) or not mapping:
@@ -100,13 +104,18 @@ def convert(detail: dict, layout_mode: str = "markdown") -> dict:
         msg = node.get("message") or {}
         role = (msg.get("author") or {}).get("role")
         metadata = msg.get("metadata") or {}
-        if role not in {"user", "assistant"} or metadata.get(
+        if role not in {"user", "assistant", "tool"} or metadata.get(
             "is_visually_hidden_from_conversation"
         ):
             continue
         content = render_content(
             msg.get("content") or {}, layout_mode if role == "assistant" else "source"
         )
+        if role == "assistant":
+            content = render_reasoning(msg, content)
+        activity = activity_kind(msg, content)
+        if activity in {"tool_call", "tool_result"}:
+            content = tool_record(msg, content, activity)
         if not content:
             continue
         date = timestamp(msg.get("create_time"))
@@ -114,14 +123,16 @@ def convert(detail: dict, layout_mode: str = "markdown") -> dict:
             "id": node_id,
             "parentId": None,
             "childrenIds": [],
-            "role": role,
+            "role": "assistant" if role == "tool" else role,
             "content": content,
             "timestamp": date if date is not None else created,
         }
-        if role == "assistant":
+        if activity:
+            message["chatgpt_activity_kind"] = activity
+        if role in {"assistant", "tool"}:
             model = metadata.get("model_slug") or detail.get("default_model_slug") or "chatgpt"
             message.update(model=model, modelName=model, done=True)
-            if model not in models:
+            if role == "assistant" and model not in models:
                 models.append(model)
         messages[node_id] = message
     if not messages:
@@ -150,6 +161,8 @@ def convert(detail: dict, layout_mode: str = "markdown") -> dict:
     )
     if current is None:
         raise ValueError(f"{ident}: selected branch has no visible messages")
+    if activity_mode == "compact":
+        messages = compact_history(messages, current)
     branch = []
     node_id = current
     while node_id is not None:
@@ -198,7 +211,12 @@ def project_for_chat(detail: dict, path: Path, source: Path) -> tuple[str, str] 
     return ident, str(name or ident)
 
 
-def load_conversations(source: Path, projects: dict | None = None, layout_mode: str = "markdown"):
+def load_conversations(
+    source: Path,
+    projects: dict | None = None,
+    layout_mode: str = "markdown",
+    activity_mode: str = "compact",
+):
     """Use the export index when present, avoiding stale files and auxiliary JSON."""
     if source.is_dir():
         index = source / ".export-index.json"
@@ -226,7 +244,7 @@ def load_conversations(source: Path, projects: dict | None = None, layout_mode: 
         for detail in data if isinstance(data, list) else [data]:
             if not isinstance(detail, dict) or "mapping" not in detail:
                 continue
-            form = convert(detail, layout_mode)
+            form = convert(detail, layout_mode, activity_mode)
             ident = form["meta"]["chatgpt_conversation_id"]
             if projects is not None:
                 project = project_for_chat(detail, path, source)
@@ -619,6 +637,8 @@ Limits and safety:
   Missing memories/instructions or disabled instructions fail validation.
   --all includes files, Canvas histories, and editable text/Markdown Canvas Notes.
   Layout tags become Markdown by default; Mermaid/code fences are preserved.
+  Reasoning/tool activity is folded into answer bubbles by default; nothing is replayed.
+  --activity-rendering nodes keeps separate source-node bubbles for inspection.
   --layout-rendering html adds static HTML previews; source keeps markup unchanged.
   --all updates YOUR personal account system prompt, never global/model prompts.
   --all does NOT enable uploads or existing-chat mutations.
@@ -690,6 +710,13 @@ Full guide: docs/openwebui-import.md
         default="markdown",
         help="Assistant layout tags: readable Markdown (default), plus static HTML artifacts, "
         "or unchanged source. Existing code/Mermaid blocks are preserved.",
+    )
+    selection.add_argument(
+        "--activity-rendering",
+        choices=["compact", "nodes"],
+        default="compact",
+        help="compact (default): fold historical tool/reasoning records into each answer; "
+        "nodes: show separate source-node bubbles. Historical calls are never executed.",
     )
     execution = parser.add_argument_group("execution")
     mode = execution.add_mutually_exclusive_group()
@@ -777,7 +804,10 @@ def main(argv=None) -> int:
             else sum(
                 1
                 for _ in load_conversations(
-                    args.source, projects if args.project_folders else None, args.layout_rendering
+                    args.source,
+                    projects if args.project_folders else None,
+                    args.layout_rendering,
+                    args.activity_rendering,
                 )
             )
         )
@@ -879,7 +909,11 @@ def main(argv=None) -> int:
             conversations = (
                 []
                 if args.only_extras
-                else load_conversations(args.source, layout_mode=args.layout_rendering)
+                else load_conversations(
+                    args.source,
+                    layout_mode=args.layout_rendering,
+                    activity_mode=args.activity_rendering,
+                )
             )
             for number, (ident, digest, form) in enumerate(conversations, 1):
                 if args.limit is not None and number > args.limit:
